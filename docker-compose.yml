@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  vault:
+    image: vault:1.13.3
+    container_name: rag-vault
+    ports: ["8200:8200"]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "root"
+      VAULT_ADDR: "http://0.0.0.0:8200"
+    cap_add: ["IPC_LOCK"]
+    networks: ["rag-network"]
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: rag-postgres
+    environment:
+      POSTGRES_USER: "admin"
+      POSTGRES_PASSWORD: "devpassword"
+      POSTGRES_DB: "library_db"
+    ports: ["5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    networks: ["rag-network"]
+
+  mongo:
+    image: mongo:6.0
+    container_name: rag-mongo
+    ports: ["27017:27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "admin"
+      MONGO_INITDB_ROOT_PASSWORD: "devpassword"
+    volumes: ["mongo_data:/data/db"]
+    networks: ["rag-network"]
+
+  backend:
+    build: ./backend
+    container_name: rag-backend
+    ports: ["5000:5000"]
+    environment:
+      - FLASK_ENV=development
+      - POSTGRES_HOST=postgres
+      - MONGO_URI=mongodb://admin:devpassword@mongo:27017/
+    depends_on: ["vault", "postgres", "mongo"]
+    networks: ["rag-network"]
+
+volumes:
+  postgres_data:
+  mongo_data:
+
+networks:
+  rag-network:
+    driver: bridge

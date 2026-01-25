@@ -1,7 +1,0 @@
-flask==3.0.0
-flask-cors==4.0.0
-psycopg2-binary==2.9.9
-pymongo==4.6.1
-hvac==2.1.0
-python-dotenv==1.0.0
-gunicorn==21.2.0

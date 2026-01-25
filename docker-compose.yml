@@ -35,13 +35,18 @@ services:
   backend:
     build: ./backend
     container_name: rag-backend
-    ports: ["5000:5000"]
+    ports:
+      - "8000:8000"       # <--- CHANGED: Django uses 8000
     environment:
-      - FLASK_ENV=development
+      - DJANGO_ENV=development
       - POSTGRES_HOST=postgres
-      - MONGO_URI=mongodb://admin:devpassword@mongo:27017/
-    depends_on: ["vault", "postgres", "mongo"]
-    networks: ["rag-network"]
+      - POSTGRES_DB=ragdb
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=devpassword
+    depends_on:
+      - postgres
+    networks:
+      - rag-network
 
 volumes:
   postgres_data:

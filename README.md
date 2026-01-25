@@ -1,33 +1,32 @@
 # ☁️ Azure Cloud-Native RAG
 
-> A production-grade Microservices architecture for secure Retrieval-Augmented Generation, built with Docker, React, Flask, and HashiCorp Vault.
+A production-grade **Microservices architecture** for secure Retrieval-Augmented Generation, built with **Django**, **React**, **Docker**, and **PostgreSQL**.
 
-This project implements a secure, scalable AI pipeline designed to run on **Azure Kubernetes Service (AKS)**. It demonstrates industry standards for container orchestration, secret management, and full-stack integration.
-
----
+This project implements a secure, scalable AI pipeline designed to run on **Azure Kubernetes Service (AKS)**. It demonstrates industry standards for container orchestration, secure backend design, and full-stack integration.
 
 ## 🏗️ System Architecture
 
-The application is composed of **5 Dockerized Microservices** working in harmony:
+The application is composed of Dockerized services working in harmony:
 
 | Service | Technology | Role | Port |
 | :--- | :--- | :--- | :--- |
 | **Frontend** | React + Vite + Tailwind | Operational Dashboard & Control Plane | `5173` |
-| **Backend** | Python (Flask) | API Gateway & RAG Orchestrator | `5000` |
-| **Logs DB** | MongoDB | Unstructured Log Storage (NoSQL) | `27017` |
-| **User DB** | PostgreSQL | Structured User Data (Relational) | `5432` |
+| **Backend** | **Python (Django + Ninja/DRF)** | API Gateway, RAG Orchestrator & Admin Panel | `8000` |
+| **Vector DB** | **pgvector (PostgreSQL)** | Vector Embeddings & Relational Data | `5432` |
 | **Security** | HashiCorp Vault | Secret Management & Encryption | `8200` |
 
----
+## 🚀 Key Features
+* **Cloud-Native:** Fully containerized and ready for Kubernetes (AKS).
+* **Enterprise Backend:** powered by **Django** for robust Admin management and ORM.
+* **Vector Search:** Native integration with PostgreSQL for high-performance RAG.
+* **Secure DevOps:** Branch protection, CI/CD pipelines, and secrets management.
 
-## 🚀 Getting Started
-
-You can spin up the entire infrastructure with a single command.
+## 🛠️ Getting Started
 
 ### Prerequisites
 * Docker Desktop (Running)
-* Node.js & npm
 * Git
+* Python 3.10+
 
 ### Installation & Run
 

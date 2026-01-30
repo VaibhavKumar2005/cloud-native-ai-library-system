@@ -1,37 +1,84 @@
-# ☁️ Azure Cloud-Native RAG
+# 📚 Librarian: Verifiable Cloud-Native RAG System
+> **Academic Project 46:** Retrieval-Augmented Generation for Verifiable and Faithful Text Generation.
 
-A production-grade **Microservices architecture** for secure Retrieval-Augmented Generation, built with **Django**, **React**, **Docker**, and **PostgreSQL**.
+## 🚀 Overview
+**Librarian** is an advanced **Verifiable RAG (Retrieval-Augmented Generation) System** designed to solve the critical problem of LLM hallucinations in high-stakes environments. 
 
-This project implements a secure, scalable AI pipeline designed to run on **Azure Kubernetes Service (AKS)**. It demonstrates industry standards for container orchestration, secure backend design, and full-stack integration.
+Unlike standard chatbots that simply "guess" answers based on retrieved text, Librarian implements a **Closed-Loop Verification Architecture**. It introduces a secondary "Critic" agent that mathematically evaluates the faithfulness of every generated answer against the source documents before presenting it to the user.
 
-## 🏗️ System Architecture
+## 🏗 Architecture
+The system moves beyond linear RAG pipelines to a cyclic **Generate-Verify-Refine** workflow:
 
-The application is composed of Dockerized services working in harmony:
+1.  **Ingestion Layer:** - PDFs are parsed, chunked, and embedded using **Google Gemini** embeddings.
+    - Vectors are stored in **PostgreSQL** using the `pgvector` extension for high-dimensional semantic search.
+2.  **Retrieval Engine (`librarian` app):** - Performs semantic search to retrieve the top-k most relevant document chunks.
+3.  **Generation:** - The LLM drafts a response citing specific chunk IDs (e.g., `[Source: 12]`).
+4.  **The Verifier (`verifier` app) — *Core Innovation*:** - A dedicated "Critic" module cross-references the drafted answer against the raw source text.
+    - Calculates a **Faithfulness Score** (0-100%).
+    - If the score is low, the system flags the answer as a hallucination or attempts a regeneration.
 
-| Service | Technology | Role | Port |
-| :--- | :--- | :--- | :--- |
-| **Frontend** | React + Vite + Tailwind | Operational Dashboard & Control Plane | `5173` |
-| **Backend** | **Python (Django + Ninja/DRF)** | API Gateway, RAG Orchestrator & Admin Panel | `8000` |
-| **Vector DB** | **pgvector (PostgreSQL)** | Vector Embeddings & Relational Data | `5432` |
-| **Security** | HashiCorp Vault | Secret Management & Encryption | `8200` |
+## ⚡ Key Features (Project Requirements)
+- [x] **Answer-Evidence Alignment:** Automated verification ensuring every claim is backed by source text.
+- [x] **Faithfulness Scoring:** Real-time reliability metric displayed to the user (e.g., 🟢 95% Verified).
+- [x] **Granular Citations:** Clickable references linking directly to the specific PDF page and paragraph.
+- [x] **Hallucination Detection:** proactively filters out unsupported claims.
+- [x] **Cloud-Native Deployment:** Containerized microservices architecture ready for Azure Kubernetes Service (AKS).
 
-## 🚀 Key Features
-* **Cloud-Native:** Fully containerized and ready for Kubernetes (AKS).
-* **Enterprise Backend:** powered by **Django** for robust Admin management and ORM.
-* **Vector Search:** Native integration with PostgreSQL for high-performance RAG.
-* **Secure DevOps:** Branch protection, CI/CD pipelines, and secrets management.
+## 🛠 Tech Stack
 
-## 🛠️ Getting Started
+### **Backend & AI**
+* **Framework:** Django & Django REST Framework (Python)
+* **Database:** PostgreSQL + `pgvector` (Vector Database)
+* **LLM Engine:** LangChain + Google Gemini Pro (via API)
+* **Task Queue:** Celery (for asynchronous document processing)
 
-### Prerequisites
-* Docker Desktop (Running)
-* Git
+### **Frontend**
+* **Library:** React.js
+* **Styling:** Tailwind CSS
+* **Visualization:** Faithfulness score indicators and PDF highlighting.
+
+### **Infrastructure (DevOps)**
+* **Containerization:** Docker & Docker Compose
+* **Cloud Provider:** Microsoft Azure
+* **Registry:** Azure Container Registry (ACR)
+* **Orchestration:** Ready for Kubernetes (AKS)
+
+---
+
+## 🔧 Setup & Installation
+
+### **1. Prerequisites**
 * Python 3.10+
+* Node.js (v18+)
+* PostgreSQL (with `vector` extension)
+* Azure CLI
+* Google Gemini API Key
 
-### Installation & Run
+### **2. Backend Setup (Django)**
+```bash
+# Clone the repository
+git clone [https://github.com/yourusername/librarian-rag.git](https://github.com/yourusername/librarian-rag.git)
+cd librarian-rag
 
-1. **Clone the Repository**
-   ```bash
-   git clone [https://github.com/VaibhavKumar2005/azure-cloud-native-rag.git](https://github.com/VaibhavKumar2005/azure-cloud-native-rag.git)
-   cd azure-cloud-native-rag
+# Activate Virtual Environment
+# Windows
+.\venv\Scripts\Activate.ps1
+# Linux/Mac
+source venv/bin/activate
+
+# Install Dependencies
+pip install -r requirements.txt
+
+# Configure Environment Variables
+# Create a .env file in the root directory:
+# GOOGLE_API_KEY=your_gemini_key
+# DATABASE_URL=postgres://user:password@localhost:5432/librarian_db
+# DEBUG=True
+
+# Database Migrations
+python manage.py makemigrations
+python manage.py migrate
+
+# Start the Development Server
+python manage.py runserver
    

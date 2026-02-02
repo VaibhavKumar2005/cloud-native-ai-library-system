@@ -1,74 +1,55 @@
-import { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 function App() {
-  const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Connect to the Flask Backend
-    fetch('http://localhost:5000/health/db')
-      .then((res) => res.json())
-      .then((data) => {
-        setStatus(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch backend status:", err);
-        setLoading(false);
-      });
-  }, []);
+  const [query, setQuery] = useState('');
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="bg-slate-800 p-8 rounded-xl shadow-2xl max-w-md w-full border border-slate-700">
-        <h1 className="text-3xl font-bold text-white mb-6 text-center">
-          System Architecture
+    <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
+      
+      {/* Navbar */}
+      <nav className="w-full bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">V</div>
+          <span className="text-xl font-semibold text-gray-800 tracking-tight">VeriRag</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+          <span className="text-green-600 text-sm font-medium">System Active</span>
+        </div>
+      </nav>
+
+      {/* Hero Section */}
+      <main className="flex-1 flex flex-col items-center justify-center p-6 text-center mt-10">
+        
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-blue-600 text-xs font-bold uppercase tracking-wider mb-6">
+          Project 46: Verified Generation
+        </div>
+
+        <h1 className="text-5xl md:text-6xl font-extrabold text-gray-900 mb-6 leading-tight max-w-4xl">
+          The Search Engine that <br />
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">
+            Checks its Own Homework.
+          </span>
         </h1>
 
-        {loading ? (
-          <p className="text-slate-400 text-center animate-pulse">Ping network...</p>
-        ) : (
-          <div className="space-y-4">
-            
-            {/* Status Item: MongoDB */}
-            <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <span className="text-2xl">🍃</span>
-                <span className="text-slate-200 font-medium">MongoDB (Logs)</span>
-              </div>
-              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                status?.mongo === 'connected' 
-                  ? 'bg-green-500/20 text-green-400' 
-                  : 'bg-red-500/20 text-red-400'
-              }`}>
-                {status?.mongo?.toUpperCase() || 'OFFLINE'}
-              </span>
-            </div>
-
-            {/* Status Item: PostgreSQL */}
-            <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <span className="text-2xl">🐘</span>
-                <span className="text-slate-200 font-medium">Postgres (Users)</span>
-              </div>
-              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                status?.postgres === 'connected' 
-                  ? 'bg-green-500/20 text-green-400' 
-                  : 'bg-red-500/20 text-red-400'
-              }`}>
-                {status?.postgres?.toUpperCase() || 'OFFLINE'}
-              </span>
-            </div>
-
+        {/* Search Box */}
+        <div className="w-full max-w-2xl relative group mt-8">
+          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-200"></div>
+          <div className="relative bg-white rounded-xl shadow-xl flex items-center p-2 border border-gray-100">
+            <input 
+              type="text" 
+              className="flex-1 px-4 py-3 text-gray-700 outline-none placeholder-gray-400 text-lg"
+              placeholder="Ask a question..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <button className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold transition-all">
+              Verify
+            </button>
           </div>
-        )}
-
-        <div className="mt-8 text-center">
-          <p className="text-slate-500 text-xs">
-            Powered by Azure Kubernetes Service & HashiCorp Vault
-          </p>
         </div>
-      </div>
+
+      </main>
     </div>
   );
 }

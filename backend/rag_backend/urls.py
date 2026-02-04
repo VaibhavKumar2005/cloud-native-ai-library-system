@@ -19,5 +19,5 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('ai_engine.urls')), # This links the engine
+    path('api/', include('ai_engine.urls')), 
 ]

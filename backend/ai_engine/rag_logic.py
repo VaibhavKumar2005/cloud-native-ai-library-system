@@ -9,7 +9,11 @@ from ai_engine.models import Document
 
 # --- CONFIGURATION ---
 # Ensure this matches your Docker/Local Postgres setup
-CONNECTION_STRING = "postgresql+psycopg2://admin:devpassword@postgres:5432/ragdb"
+import os
+CONNECTION_STRING = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+psycopg2://admin:devpassword@localhost:5432/library_db"
+)
 COLLECTION_NAME = "rag_collection"
 
 def get_embedding_model():

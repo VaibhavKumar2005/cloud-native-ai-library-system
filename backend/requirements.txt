@@ -67,3 +67,5 @@ psycopg2-binary
 pgvector
 langchain-google-genai
 langchain-text-splitters
+google-generativeai
+django-cors-headers

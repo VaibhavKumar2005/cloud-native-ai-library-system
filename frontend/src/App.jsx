@@ -1,10 +1,53 @@
-import React, { useState } from 'react';
+// FILE: frontend/src/App.jsx
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+
+const API_BASE = 'http://127.0.0.1:8000/api';
 
 function App() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
+
+  const fetchDocuments = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/documents/`);
+      setDocuments(response.data);
+    } catch (error) {
+      console.error("Failed to fetch documents:", error);
+    }
+  };
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('title', file.name);
+
+    setUploading(true);
+    try {
+      await axios.post(`${API_BASE}/upload/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      fetchDocuments();
+      setShowUpload(false);
+      alert('Document uploaded and processed successfully!');
+    } catch (error) {
+      console.error("Upload failed:", error);
+      alert('Upload failed: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleVerify = async () => {
     if (!query) return;
@@ -12,16 +55,17 @@ function App() {
     setResult(null);
 
     try {
-      // Points to your Django backend
-      const response = await axios.post('http://127.0.0.1:8000/api/query/', {
+      const response = await axios.post(`${API_BASE}/query/`, {
         query: query
       });
       setResult(response.data);
     } catch (error) {
-      console.error("Link Broken:", error);
+      console.error("Query failed:", error);
       setResult({
-        answer: "Connection failed. Is the Django Brain active?",
-        faithfulness_score: 0
+        answer: "Connection failed. Is the Django server running?",
+        faithfulness_score: 0,
+        explanation: error.message,
+        source_citation: "System Error"
       });
     } finally {
       setLoading(false);
@@ -37,15 +81,19 @@ function App() {
         <div className="absolute bottom-[10%] right-[-5%] w-[40%] h-[40%] bg-indigo-600/10 blur-[100px] rounded-full"></div>
       </div>
 
-      {/* Tailwind-style Navbar */}
+      {/* Navbar */}
       <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/70 backdrop-blur-md px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-gradient-to-tr from-blue-500 to-indigo-600 rounded-lg shadow-lg shadow-blue-500/20 flex items-center justify-center font-black text-white">V</div>
           <span className="text-lg font-bold tracking-tight text-white">VeriRag</span>
         </div>
         <div className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
-          <span className="hover:text-white cursor-pointer transition-colors">Documentation</span>
-          <span className="hover:text-white cursor-pointer transition-colors">Project 46</span>
+          <span className="hover:text-white cursor-pointer transition-colors" onClick={() => setShowUpload(!showUpload)}>
+            📄 Upload PDF
+          </span>
+          <span className="hover:text-white cursor-pointer transition-colors">
+            {documents.length} Documents
+          </span>
           <div className={`px-3 py-1 rounded-full border border-slate-800 flex items-center gap-2 ${loading ? 'bg-blue-500/10' : 'bg-emerald-500/10'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${loading ? 'bg-blue-400 animate-pulse' : 'bg-emerald-400'}`}></span>
             <span className="text-[10px] uppercase tracking-widest font-bold text-slate-300">
@@ -57,6 +105,24 @@ function App() {
 
       {/* Main Content */}
       <main className="relative z-10 max-w-5xl mx-auto px-6 pt-24 pb-20">
+        
+        {/* Upload Section */}
+        {showUpload && (
+          <div className="mb-12 max-w-3xl mx-auto">
+            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-8 backdrop-blur-sm">
+              <h3 className="text-2xl font-bold text-white mb-4">Upload PDF Document</h3>
+              <input 
+                type="file" 
+                accept=".pdf"
+                onChange={handleUpload}
+                disabled={uploading}
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-500 disabled:opacity-50"
+              />
+              {uploading && <p className="mt-3 text-blue-400 text-sm">Processing document...</p>}
+            </div>
+          </div>
+        )}
+
         <div className="text-center mb-16">
           <h1 className="text-5xl md:text-7xl font-extrabold text-white tracking-tight mb-6">
             RAG that doesn't <br />
@@ -70,7 +136,7 @@ function App() {
           </p>
         </div>
 
-        {/* The Search Engine Input */}
+        {/* Search Input */}
         <div className="max-w-3xl mx-auto relative group">
           <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-cyan-500 rounded-2xl blur opacity-20 group-focus-within:opacity-40 transition duration-500"></div>
           <div className="relative bg-slate-900 border border-slate-700 rounded-2xl flex items-center p-2 shadow-2xl">
@@ -92,7 +158,7 @@ function App() {
           </div>
         </div>
 
-        {/* Results Card */}
+        {/* Results */}
         {result && (
           <div className="mt-12 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-8 duration-700">
             <div className="bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden backdrop-blur-sm">
@@ -109,7 +175,17 @@ function App() {
                 <p className="text-xl text-slate-200 leading-relaxed font-light">
                   {result.answer}
                 </p>
-                {result.source_citation && (
+                
+                {/* Explanation */}
+                {result.explanation && (
+                  <div className="mt-6 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Verification Details</span>
+                    <p className="text-sm text-slate-300">{result.explanation}</p>
+                  </div>
+                )}
+                
+                {/* Source Citation */}
+                {result.source_citation && result.source_citation !== "None" && result.source_citation !== "System Error" && (
                   <div className="mt-8 pt-8 border-t border-slate-800/50">
                     <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block mb-3">Librarian's Proof</span>
                     <div className="p-5 bg-blue-500/5 rounded-2xl border border-blue-500/10 text-sm text-slate-400 font-mono leading-relaxed">

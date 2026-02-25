@@ -32,10 +32,18 @@ export default function Dashboard({ onLogout }) {
 
   // CALLED SECOND: Safe from the Temporal Dead Zone error
   useEffect(() => {
-    fetchDocuments()
+    // 1. Wrap the initial fetch in an async function to satisfy ESLint
+    const loadInitialData = async () => {
+      await fetchDocuments()
+    }
+    
+    // 2. Call the wrapper
+    loadInitialData() 
+    
+    // 3. Keep the polling interval the same
     const interval = setInterval(fetchDocuments, 5000) 
     return () => clearInterval(interval)
-  }, [])
+  }, [fetchDocuments]) // 4. Include fetchDocuments in the dependency array
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0]

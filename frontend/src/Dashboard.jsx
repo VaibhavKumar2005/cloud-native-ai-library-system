@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,29 +14,31 @@ export default function Dashboard({ onLogout }) {
   const [chatHistory, setChatHistory] = useState([])
   const [documents, setDocuments] = useState([])
 
-  const token = localStorage.getItem('access_token')
-  const api = axios.create({
-    baseURL: 'http://localhost:8000/api/',
-    headers: { Authorization: `Bearer ${token}` }
-  })
-
-  // 1. Defined first so React knows it exists before useEffect runs
-  const fetchDocuments = async () => {
+  // 1. Wrap fetchDocuments in useCallback so it's perfectly optimized
+  const fetchDocuments = useCallback(async () => {
     try {
-      const res = await api.get('documents/')
+      const token = localStorage.getItem('access_token')
+      const res = await axios.get('http://localhost:8000/api/documents/', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
       setDocuments(res.data)
     } catch (err) { 
       console.error("Sync error", err) 
     }
-  }
-
-  // 2. Polls the backend every 5 seconds to see if the PDF is done vectorizing
-  useEffect(() => {
-    fetchDocuments()
-    const interval = setInterval(fetchDocuments, 5000) 
-    return () => clearInterval(interval)
   }, [])
 
+  // 2. Safely call it inside useEffect
+ // 2. Safely call it inside useEffect using an async wrapper to satisfy ESLint
+  useEffect(() => {
+    const loadInitialData = async () => {
+      await fetchDocuments()
+    }
+    
+    loadInitialData() // Call the wrapper instead of the function directly
+    
+    const interval = setInterval(fetchDocuments, 5000) 
+    return () => clearInterval(interval)
+  }, [fetchDocuments])
   const handleFileUpload = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -46,7 +48,10 @@ export default function Dashboard({ onLogout }) {
     formData.append('title', file.name)
 
     try {
-      await api.post('documents/', formData)
+      const token = localStorage.getItem('access_token')
+      await axios.post('http://localhost:8000/api/documents/', formData, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
       fetchDocuments()
     } catch (err) { 
       console.error("Upload failed", err) 
@@ -59,7 +64,11 @@ export default function Dashboard({ onLogout }) {
     if (!query) return
     setLoading(true)
     try {
-      const res = await api.post('query_llm/', { query })
+      const token = localStorage.getItem('access_token')
+      const res = await axios.post('http://localhost:8000/api/query_llm/', 
+        { query },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
       setChatHistory([{ question: query, ...res.data }, ...chatHistory])
       setQuery('')
     } catch (err) { 

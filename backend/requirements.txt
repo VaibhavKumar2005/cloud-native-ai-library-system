@@ -26,3 +26,5 @@ django-prometheus
 drf-spectacular
 
 google-generativeai
+
+hvac==2.1.0

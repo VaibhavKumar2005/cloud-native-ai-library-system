@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import hvac  # For HashiCorp Vault
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,7 +13,6 @@ from ai_engine.models import Document
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
-# We use the environment variables from your docker-compose.yml
 DB_USER = os.environ.get("POSTGRES_USER", "admin")
 DB_PASS = os.environ.get("POSTGRES_PASSWORD", "devpassword")
 DB_HOST = os.environ.get("POSTGRES_HOST", "postgres") 
@@ -21,23 +21,37 @@ DB_NAME = os.environ.get("POSTGRES_DB", "library_db")
 
 # Construct the connection string using the 'postgres' hostname
 CONNECTION_STRING = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
 COLLECTION_NAME = "rag_collection"
 
+# --- VAULT INTEGRATION ---
+def get_api_key_from_vault():
+    """Connects to Vault and securely retrieves the Google API Key from memory."""
+    try:
+        client = hvac.Client(
+            url='http://vault:8200',
+            token=os.environ.get('VAULT_TOKEN')
+        )
+        # Read from KV v2 secret engine path established earlier
+        secret_response = client.secrets.kv.v2.read_secret_version(path='myapp')
+        return secret_response['data']['data']['GOOGLE_API_KEY']
+    except Exception as e:
+        logger.error(f"Vault Security Error: {str(e)}")
+        return None
+
 def get_embedding_model():
-    """Helper to get the embedding model with the API key."""
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    """Helper to get the embedding model using the secure API key."""
+    api_key = get_api_key_from_vault()
     if not api_key:
-        raise ValueError("GOOGLE_API_KEY is missing! Check your .env file.")
+        raise ValueError("Vault Error: GOOGLE_API_KEY is missing or Vault is sealed!")
     
     return GoogleGenerativeAIEmbeddings(
         model="models/text-embedding-004", 
         google_api_key=api_key
     )
 
-# --- 1. THE INGESTION ENGINE ---
+# --- 1. THE INGESTION ENGINE (Multi-Tenant Updated) ---
 def ingest_document(doc_id):
-    """Reads a PDF and saves it to the Vector Database."""
+    """Reads a PDF, tags it with the owner's ID, and saves to Vector DB."""
     try:
         doc = Document.objects.get(id=doc_id)
         file_path = doc.file.path
@@ -51,6 +65,11 @@ def ingest_document(doc_id):
         raw_docs = loader.load()
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = text_splitter.split_documents(raw_docs)
+        
+        # 🚨 METADATA INJECTION: Tag chunks with the user's ID
+        for chunk in chunks:
+            # We use str() just in case the UUID/ID format causes issues with PGVector
+            chunk.metadata["user_id"] = str(doc.user.id) if doc.user else "public"
         
         # Save to Vector DB
         PGVector.from_documents(
@@ -70,27 +89,34 @@ def ingest_document(doc_id):
         logger.error(f"❌ Ingestion failed: {str(e)}")
         return False
 
-# --- 2. THE VERIFICATION ENGINE ---
-def get_verified_answer(query):
-    """Retrieves context and generates a verified response using Gemini JSON mode."""
+# --- 2. THE VERIFICATION ENGINE (Multi-Tenant Updated) ---
+def get_verified_answer(query, user_id):
+    """Retrieves context specific to the user and generates a verified response."""
     try:
-        api_key = os.environ.get("GOOGLE_API_KEY")
+        # Secure fetch from Vault
+        api_key = get_api_key_from_vault()
         if not api_key:
-            return {"answer": "System Error: Missing API Key", "faithfulness_score": 0}
+            return {"answer": "System Error: Missing API Key from Vault", "faithfulness_score": 0}
 
-        # 1. RETRIEVAL
+        # 1. RETRIEVAL WITH ISOLATION
         vector_db = PGVector(
             collection_name=COLLECTION_NAME,
             connection_string=CONNECTION_STRING,
             embedding_function=get_embedding_model(),
         )
         
-        docs = vector_db.similarity_search(query, k=3)
+        # 🚨 TENANT FILTER: Only search vectors belonging to this specific user
+        docs = vector_db.similarity_search(
+            query, 
+            k=3,
+            filter={"user_id": str(user_id)} 
+        )
+        
         if not docs:
             return {
-                "answer": "I couldn't find any relevant information in the uploaded documents.",
+                "answer": "I couldn't find any relevant information in your uploaded documents.",
                 "faithfulness_score": 0.0,
-                "explanation": "No matching vectors found in the database.",
+                "explanation": "No matching vectors found for this user in the database.",
                 "source_citation": "None"
             }
 
@@ -99,7 +125,6 @@ def get_verified_answer(query):
         # 2. GENERATION WITH JSON MODE
         genai.configure(api_key=api_key)
         
-        # CRITICAL CHANGE: Enforce JSON response type
         generation_config = {
             "temperature": 0.0,
             "response_mime_type": "application/json"
@@ -134,7 +159,7 @@ def get_verified_answer(query):
 
         response = model.generate_content(prompt)
         
-        # 3. PARSE (No more regex hacking needed)
+        # 3. PARSE
         return json.loads(response.text)
 
     except Exception as e:

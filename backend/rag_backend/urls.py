@@ -19,6 +19,10 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
 
 # 1. Add this import for the Swagger UI
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -27,6 +31,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('ai_engine.urls')), 
     path('', include('django_prometheus.urls')), 
+
+    # 🚨 ADD THESE TWO LINES: This is what the frontend is looking for
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
     # 2. Add these two lines for the API Interface
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

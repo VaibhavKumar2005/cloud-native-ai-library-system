@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from ai_engine.models import Document
 from ai_engine.rag_logic import get_verified_answer
-from .serializers import DocumentSerializer # assuming you have this
+from .serializers import DocumentSerializer 
 
 # 1. Secure the Document Upload/List Endpoint
 class DocumentViewSet(viewsets.ModelViewSet):

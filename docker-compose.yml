@@ -11,6 +11,19 @@ services:
     cap_add: ["IPC_LOCK"]
     networks: ["rag-network"]
 
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    ports: ["6379:6379"]
+    volumes: ["redis_data:/data"]
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: ["rag-network"]
+
   postgres:
     image: pgvector/pgvector:pg16
     container_name: rag-postgres
@@ -46,10 +59,51 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       - postgres
       - mongo
-      - vault  # <--- ADDED THIS
+      - vault
+      - redis
+    networks: ["rag-network"]
+
+  celery-worker:
+    build: ./backend
+    container_name: rag-celery-worker
+    command: celery -A rag_backend worker -l info -Q celery,ingestion,monitoring,maintenance
+    volumes:
+      - ./backend:/app
+      - ./backend/media/pdfs:/app/pdfs
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+      - postgres
+      - backend
+    networks: ["rag-network"]
+
+  celery-beat:
+    build: ./backend
+    container_name: rag-celery-beat
+    command: celery -A rag_backend beat -l info
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+      - celery-worker
     networks: ["rag-network"]
 
   # FIXED: Indentation aligned to the left
@@ -84,7 +138,8 @@ services:
 volumes:
   postgres_data:
   mongo_data:
-  grafana_data: # FIXED: Added this missing volume
+  grafana_data:
+  redis_data:
 
 networks:
   rag-network:

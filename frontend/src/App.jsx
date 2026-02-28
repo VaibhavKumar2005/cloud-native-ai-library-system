@@ -1,188 +1,50 @@
-import { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Shield, Upload, MessageSquare, Activity, FileText } from "lucide-react"
-import axios from 'axios'
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Dashboard from './Dashboard';
+import Monitoring from './Monitoring';
+import Analytics from './Analytics';
+import Login from './Login';
 
-export default function Dashboard({ onLogout }) {
-  const [query, setQuery] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [chatHistory, setChatHistory] = useState([])
-  const [documents, setDocuments] = useState([])
+// ── Auth Guard: Redirects unauthenticated users to /login ──────────
+function ProtectedRoute({ children }) {
+  const token = localStorage.getItem('access_token');
+  if (!token) return <Navigate to="/login" replace />;
+  return children;
+}
 
-  const token = localStorage.getItem('access_token')
-  const api = axios.create({
-    baseURL: 'http://localhost:8000/api/',
-    headers: { Authorization: `Bearer ${token}` }
-  })
-
-  // DEFINED FIRST: So useEffect knows what this is
-  const fetchDocuments = async () => {
-    try {
-      const res = await api.get('documents/')
-      setDocuments(res.data)
-    } catch (err) { 
-      console.error("Sync error", err) 
-    }
-  }
-
-  // CALLED SECOND: Safe from the Temporal Dead Zone error
-  useEffect(() => {
-    // 1. Wrap the initial fetch in an async function to satisfy ESLint
-    const loadInitialData = async () => {
-      await fetchDocuments()
-    }
-    
-    // 2. Call the wrapper
-    loadInitialData() 
-    
-    // 3. Keep the polling interval the same
-    const interval = setInterval(fetchDocuments, 5000) 
-    return () => clearInterval(interval)
-  }, [fetchDocuments]) // 4. Include fetchDocuments in the dependency array
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    setUploading(true)
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('title', file.name)
-
-    try {
-      await api.post('documents/', formData)
-      fetchDocuments()
-    } catch (err) { 
-      console.error("Upload failed", err) 
-    }
-    setUploading(false)
-  }
-
-  const handleQuery = async (e) => {
-    e.preventDefault()
-    if (!query) return
-    setLoading(true)
-    try {
-      const res = await api.post('query_llm/', { query })
-      setChatHistory([{ question: query, ...res.data }, ...chatHistory])
-      setQuery('')
-    } catch (err) { 
-      console.error("AI Error", err) 
-    }
-    setLoading(false)
-  }
+export default function App() {
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    window.location.href = '/login'; 
+  };
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-50 font-sans">
-      {/* Sidebar */}
-      <div className="w-64 border-r border-slate-800 flex flex-col p-4 bg-slate-900/50">
-        <div className="flex items-center gap-3 mb-10 px-2">
-          <Shield className="text-indigo-500 w-8 h-8" />
-          <span className="font-bold text-lg tracking-tight">VeriRAG</span>
-        </div>
-        <nav className="flex-1 space-y-2">
-          <Button variant="ghost" className="w-full justify-start gap-3 bg-slate-800 text-white">
-            <Activity className="w-4 h-4" /> Mission Control
-          </Button>
-        </nav>
-        <Button onClick={onLogout} variant="outline" className="border-slate-700 text-slate-400 hover:bg-red-950 hover:text-red-400">
-          End Session
-        </Button>
-      </div>
+    <Router>
+      <Routes>
+        {/* Public Route */}
+        <Route path="/login" element={<Login />} />
 
-      {/* Main Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Column: Library */}
-        <div className="w-80 border-r border-slate-800 p-6 overflow-y-auto bg-slate-950">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500">Library</h2>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700">
-                  <Upload className="w-4 h-4 mr-2" /> Add PDF
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="bg-slate-900 border-slate-800 text-white">
-                <DialogHeader><DialogTitle>Ingest New Document</DialogTitle></DialogHeader>
-                <div className="py-4">
-                   <Input type="file" accept=".pdf" onChange={handleFileUpload} className="bg-slate-950 border-slate-800" />
-                   {uploading && <p className="text-xs text-indigo-400 mt-2 animate-pulse">Uploading...</p>}
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
-          <div className="space-y-3">
-            {documents.map(doc => (
-              <Card key={doc.id} className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-3 flex items-start gap-3">
-                  <FileText className="w-5 h-5 text-indigo-400 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{doc.title}</p>
-                    <p className={`text-[10px] mt-1 font-bold ${doc.processed ? 'text-emerald-500' : 'text-amber-500'}`}>
-                      {doc.processed ? '● INDEXED' : '○ PROCESSING'}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+        {/* Protected Routes */}
+        <Route path="/" element={
+          <ProtectedRoute>
+            <Dashboard onLogout={handleLogout} />
+          </ProtectedRoute>
+        } />
+        <Route path="/monitoring" element={
+          <ProtectedRoute>
+            <Monitoring />
+          </ProtectedRoute>
+        } />
+        <Route path="/analytics" element={
+          <ProtectedRoute>
+            <Analytics />
+          </ProtectedRoute>
+        } />
 
-        {/* Right Column: AI Terminal */}
-        <div className="flex-1 flex flex-col bg-slate-900/20">
-          <div className="flex-1 p-8 overflow-y-auto space-y-8">
-            {chatHistory.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-slate-600 italic">
-                <MessageSquare className="w-12 h-12 mb-4 opacity-20" />
-                <p>Awaiting your query. All responses are verified against the library.</p>
-              </div>
-            )}
-            {chatHistory.map((chat, i) => (
-              <div key={i}>
-                <div className="flex justify-end mb-4">
-                  <div className="bg-indigo-600 px-4 py-2 rounded-2xl rounded-tr-none max-w-md">
-                    {chat.question}
-                  </div>
-                </div>
-                <Card className="bg-slate-900 border-slate-800 border-l-4 border-l-emerald-500">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-[10px] font-mono tracking-widest text-emerald-500 uppercase flex items-center gap-2">
-                      <Shield className="w-3 h-3" /> Integrity Verified Response
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <p className="text-slate-200 text-sm">{chat.answer}</p>
-                    <div className="space-y-2 pt-2 border-t border-slate-800">
-                      <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                        <span>Faithfulness Confidence</span>
-                        <span className="text-emerald-400">{(chat.faithfulness_score * 100).toFixed(0)}%</span>
-                      </div>
-                      <Progress value={chat.faithfulness_score * 100} className="h-1 bg-slate-800" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            ))}
-          </div>
-          <div className="p-8 bg-slate-950/50 border-t border-slate-800">
-            <form onSubmit={handleQuery} className="flex gap-4 max-w-4xl mx-auto">
-              <Input 
-                placeholder="Ask VeriRAG Librarian..." 
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="bg-slate-900 border-slate-800 h-12"
-              />
-              <Button type="submit" disabled={loading} className="h-12 px-8 bg-indigo-600">
-                {loading ? "Verifying..." : "Query AI"}
-              </Button>
-            </form>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+        {/* Catch-all: redirect unknown routes to login */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </Router>
+  );
 }

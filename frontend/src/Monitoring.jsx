@@ -13,13 +13,16 @@ import {
   Loader2,
   WifiOff,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  ArrowLeft,
+  TrendingUp,
+  Clock
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 const API_URL = "http://localhost:8000/api/system-insights/";
 const POLL_INTERVAL_MS = 10000;
-const TOKEN_KEY = "access_token"; // Aligned with existing App.jsx convention
+const TOKEN_KEY = "access_token";
 
 const Monitoring = () => {
   const navigate = useNavigate();
@@ -28,6 +31,8 @@ const Monitoring = () => {
   const [fetchError, setFetchError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [trendHistory, setTrendHistory] = useState([]);
+  const [sessionStart] = useState(new Date());
   const logEndRef = useRef(null);
 
   // ── Telemetry Logic ──────────────────────────────────────────────────
@@ -68,6 +73,17 @@ const Monitoring = () => {
         msg: `[system] Telemetry sync: ${data.metrics.hallucinations_prevented} blocked, Vault: ${data.infrastructure.vault}, DB: ${data.infrastructure.database}`
       };
       setLogs(prev => [newLog, ...prev].slice(0, 50));
+
+      // Track trend data for confidence chart (up to 20 data points)
+      setTrendHistory(prev => [
+        ...prev,
+        {
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          blocked: data.metrics.hallucinations_prevented,
+          failovers: data.metrics.failover_recoveries,
+          status: data.status
+        }
+      ].slice(-20));
 
     } catch (err) {
       console.error("Telemetry Fetch Error:", err);
@@ -119,6 +135,17 @@ const Monitoring = () => {
       <nav className="sticky top-0 z-50 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
+            
+            {/* --- THE NEW BACK BUTTON --- */}
+            <button 
+              onClick={() => navigate("/")} 
+              className="mr-2 p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
+              title="Back to Library"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            {/* ------------------------- */}
+
             <div className="rounded-lg bg-indigo-500/10 p-2 border border-indigo-500/20">
               <Activity className="h-5 w-5 text-indigo-400" />
             </div>
@@ -238,6 +265,90 @@ const Monitoring = () => {
           </Card>
         </div>
 
+        {/* Confidence Trend & Uptime Row */}
+        <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
+          {/* Verification Confidence Trend (Mini Sparkline) */}
+          <Card className="border-slate-800 bg-slate-900/50">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+              <CardTitle className="text-xs font-mono uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <TrendingUp className="h-3 w-3" /> Integrity Trend
+              </CardTitle>
+              <span className="text-[9px] text-slate-600 font-mono">{trendHistory.length} SAMPLES</span>
+            </CardHeader>
+            <CardContent>
+              {trendHistory.length < 2 ? (
+                <p className="text-xs text-slate-600 italic py-4 text-center">Collecting data points...</p>
+              ) : (
+                <div className="space-y-3">
+                  {/* ASCII-style sparkline visualization */}
+                  <div className="flex items-end gap-[3px] h-16">
+                    {trendHistory.map((point, i) => {
+                      const maxVal = Math.max(...trendHistory.map(p => p.blocked), 1);
+                      const height = Math.max((point.blocked / maxVal) * 100, 8);
+                      return (
+                        <div
+                          key={i}
+                          className={`flex-1 rounded-t transition-all duration-500 ${
+                            point.status === "Operational" ? "bg-emerald-500/60" : "bg-amber-500/60"
+                          }`}
+                          style={{ height: `${height}%` }}
+                          title={`${point.time}: ${point.blocked} blocked`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between text-[9px] text-slate-700 font-mono">
+                    <span>{trendHistory[0]?.time}</span>
+                    <span>{trendHistory[trendHistory.length - 1]?.time}</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Session Uptime & Stats */}
+          <Card className="border-slate-800 bg-slate-900/50">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+              <CardTitle className="text-xs font-mono uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Clock className="h-3 w-3" /> Session Stats
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] uppercase text-slate-600 tracking-wide">Session Uptime</p>
+                  <p className="text-lg font-bold text-indigo-400 tabular-nums">
+                    <SessionUptime start={sessionStart} />
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase text-slate-600 tracking-wide">Telemetry Polls</p>
+                  <p className="text-lg font-bold text-slate-300 tabular-nums">{trendHistory.length}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase text-slate-600 tracking-wide">System Health</p>
+                  <p className={`text-lg font-bold ${
+                    trendHistory.length > 0 && trendHistory.every(p => p.status === "Operational") 
+                      ? "text-emerald-400" 
+                      : "text-amber-400"
+                  }`}>
+                    {trendHistory.length > 0 && trendHistory.every(p => p.status === "Operational") ? "100%" : "Degraded"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase text-slate-600 tracking-wide">Avg Block Rate</p>
+                  <p className="text-lg font-bold text-emerald-400 tabular-nums">
+                    {trendHistory.length > 0 
+                      ? (trendHistory[trendHistory.length - 1].blocked / Math.max(trendHistory.length, 1)).toFixed(1)
+                      : "—"
+                    }/poll
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Terminal Section */}
         <div className="mt-10">
           <div className="flex items-center justify-between rounded-t-xl border border-slate-800 bg-slate-900/50 px-4 py-2">
@@ -267,5 +378,23 @@ const Monitoring = () => {
     </div>
   );
 };
+
+// ── Session Uptime Live Counter ────────────────────────────────────────
+function SessionUptime({ start }) {
+  const [elapsed, setElapsed] = useState("");
+  useEffect(() => {
+    const tick = () => {
+      const diff = Math.floor((Date.now() - start.getTime()) / 1000);
+      const h = Math.floor(diff / 3600);
+      const m = Math.floor((diff % 3600) / 60);
+      const s = diff % 60;
+      setElapsed(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [start]);
+  return <>{elapsed}</>;
+}
 
 export default Monitoring;

@@ -145,3 +145,64 @@ TEMPLATES = [
         },
     },
 ]
+
+# --- 7. CELERY CONFIGURATION (Background Task Processing) ---
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
+# Task routing for specialized queues
+CELERY_TASK_ROUTES = {
+    'ai_engine.tasks.ingest_document_task': {'queue': 'ingestion'},
+    'ai_engine.tasks.process_pending_documents': {'queue': 'ingestion'},
+    'ai_engine.tasks.system_health_check': {'queue': 'monitoring'},
+    'ai_engine.tasks.cleanup_orphaned_vectors': {'queue': 'maintenance'},
+}
+
+# --- 8. OPENTELEMETRY CONFIGURATION ---
+OTEL_ENABLED = os.environ.get('OTEL_ENABLED', 'true').lower() == 'true'
+OTEL_SERVICE_NAME = os.environ.get('OTEL_SERVICE_NAME', 'verirag-backend')
+OTEL_EXPORTER_ENDPOINT = os.environ.get('OTEL_EXPORTER_ENDPOINT', 'http://jaeger:4317')
+
+# --- 9. LOGGING CONFIGURATION ---
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'ai_engine': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'celery': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

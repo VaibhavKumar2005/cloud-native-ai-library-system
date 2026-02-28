@@ -1,20 +1,22 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Shield, Upload, MessageSquare, Activity, FileText } from "lucide-react"
+import { Shield, Upload, MessageSquare, Activity, FileText, BarChart3 } from "lucide-react"
 import axios from 'axios'
 
 export default function Dashboard({ onLogout }) {
+  const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [selectedFile, setSelectedFile] = useState(null) // Added state to hold the file
   const [chatHistory, setChatHistory] = useState([])
   const [documents, setDocuments] = useState([])
 
-  // 1. Wrap fetchDocuments in useCallback so it's perfectly optimized
   const fetchDocuments = useCallback(async () => {
     try {
       const token = localStorage.getItem('access_token')
@@ -27,25 +29,22 @@ export default function Dashboard({ onLogout }) {
     }
   }, [])
 
-  // 2. Safely call it inside useEffect
- // 2. Safely call it inside useEffect using an async wrapper to satisfy ESLint
   useEffect(() => {
     const loadInitialData = async () => {
       await fetchDocuments()
     }
-    
-    loadInitialData() // Call the wrapper instead of the function directly
-    
+    loadInitialData()
     const interval = setInterval(fetchDocuments, 5000) 
     return () => clearInterval(interval)
   }, [fetchDocuments])
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+
+  // Updated to upload only when explicitly called
+  const handleFileUpload = async () => {
+    if (!selectedFile) return
     setUploading(true)
     const formData = new FormData()
-    formData.append('file', file)
-    formData.append('title', file.name)
+    formData.append('file', selectedFile)
+    formData.append('title', selectedFile.name)
 
     try {
       const token = localStorage.getItem('access_token')
@@ -53,6 +52,7 @@ export default function Dashboard({ onLogout }) {
         headers: { Authorization: `Bearer ${token}` }
       })
       fetchDocuments()
+      setSelectedFile(null) // Clear file after successful upload
     } catch (err) { 
       console.error("Upload failed", err) 
     }
@@ -65,11 +65,17 @@ export default function Dashboard({ onLogout }) {
     setLoading(true)
     try {
       const token = localStorage.getItem('access_token')
-      const res = await axios.post('http://localhost:8000/api/query_llm/', 
+      const res = await axios.post('http://localhost:8000/api/query/', 
         { query },
         { headers: { Authorization: `Bearer ${token}` } }
       )
-      setChatHistory([{ question: query, ...res.data }, ...chatHistory])
+      const newEntry = { question: query, timestamp: new Date().toISOString(), ...res.data }
+      setChatHistory([newEntry, ...chatHistory])
+      
+      // Save to localStorage for Analytics dashboard
+      const existingHistory = JSON.parse(localStorage.getItem('verirag_query_history') || '[]')
+      localStorage.setItem('verirag_query_history', JSON.stringify([newEntry, ...existingHistory].slice(0, 100)))
+      
       setQuery('')
     } catch (err) { 
       console.error("AI Error", err) 
@@ -79,15 +85,18 @@ export default function Dashboard({ onLogout }) {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-50 font-sans">
-      {/* --- SIDEBAR --- */}
       <div className="w-64 border-r border-slate-800 flex flex-col p-4 bg-slate-900/50">
         <div className="flex items-center gap-3 mb-10 px-2">
           <Shield className="text-indigo-500 w-8 h-8" />
           <span className="font-bold text-lg tracking-tight">VeriRAG</span>
         </div>
         <nav className="flex-1 space-y-2">
-          <Button variant="ghost" className="w-full justify-start gap-3 bg-slate-800 text-white">
+          {/* Navigation Buttons */}
+          <Button onClick={() => navigate('/monitoring')} variant="ghost" className="w-full justify-start gap-3 bg-slate-800 text-white">
             <Activity className="w-4 h-4" /> Mission Control
+          </Button>
+          <Button onClick={() => navigate('/analytics')} variant="ghost" className="w-full justify-start gap-3 hover:bg-slate-800 text-slate-400 hover:text-white">
+            <BarChart3 className="w-4 h-4" /> Analytics
           </Button>
         </nav>
         <Button onClick={onLogout} variant="outline" className="border-slate-700 text-slate-400 hover:bg-red-950 hover:text-red-400">
@@ -95,10 +104,7 @@ export default function Dashboard({ onLogout }) {
         </Button>
       </div>
 
-      {/* --- MAIN WORKSPACE --- */}
       <div className="flex-1 flex overflow-hidden">
-        
-        {/* LEFT COLUMN: Document Library */}
         <div className="w-80 border-r border-slate-800 p-6 overflow-y-auto bg-slate-950">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500">Library</h2>
@@ -110,9 +116,24 @@ export default function Dashboard({ onLogout }) {
               </DialogTrigger>
               <DialogContent className="bg-slate-900 border-slate-800 text-white">
                 <DialogHeader><DialogTitle>Ingest New Document</DialogTitle></DialogHeader>
-                <div className="py-4">
-                   <Input type="file" accept=".pdf" onChange={handleFileUpload} className="bg-slate-950 border-slate-800" />
-                   {uploading && <p className="text-xs text-indigo-400 mt-2 animate-pulse">Uploading to Database...</p>}
+                <div className="py-4 flex flex-col gap-4">
+                   <Input 
+                     type="file" 
+                     accept=".pdf" 
+                     onChange={(e) => setSelectedFile(e.target.files[0])} 
+                     className="bg-slate-950 border-slate-800" 
+                   />
+                   {/* Explicit Upload Button */}
+                   {selectedFile && (
+                     <Button 
+                       onClick={handleFileUpload} 
+                       disabled={uploading} 
+                       className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                     >
+                       {uploading ? "Indexing to Vault..." : "Upload to Library"}
+                     </Button>
+                   )}
+                   {uploading && <p className="text-xs text-indigo-400 mt-2 animate-pulse text-center">Processing vector embeddings...</p>}
                 </div>
               </DialogContent>
             </Dialog>
@@ -136,7 +157,6 @@ export default function Dashboard({ onLogout }) {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: AI Terminal */}
         <div className="flex-1 flex flex-col bg-slate-900/20">
           <div className="flex-1 p-8 overflow-y-auto space-y-8">
             {chatHistory.length === 0 && (
@@ -181,7 +201,6 @@ export default function Dashboard({ onLogout }) {
             ))}
           </div>
 
-          {/* AI Terminal Input */}
           <div className="p-8 bg-slate-950/50 border-t border-slate-800">
             <form onSubmit={handleQuery} className="flex gap-4 max-w-4xl mx-auto">
               <Input 
@@ -195,7 +214,6 @@ export default function Dashboard({ onLogout }) {
               </Button>
             </form>
           </div>
-          
         </div>
       </div>
     </div>

@@ -1,51 +1,70 @@
 version: '3.8'
 
 services:
-  vault:
+  # --- CORE INFRASTRUCTURE ---
+  rag-vault:
     image: vault:1.13.3
     container_name: rag-vault
-    ports: ["8200:8200"]
+    ports:
+      - "8200:8200"
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: "${VAULT_TOKEN:-root}"
       VAULT_ADDR: "http://0.0.0.0:8200"
-    cap_add: ["IPC_LOCK"]
-    networks: ["rag-network"]
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - rag-network
 
-  redis:
+  rag-redis:
     image: redis:7-alpine
     container_name: rag-redis
-    ports: ["6379:6379"]
-    volumes: ["redis_data:/data"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
-    networks: ["rag-network"]
+    networks:
+      - rag-network
 
-  postgres:
+  rag-db:
     image: pgvector/pgvector:pg16
-    container_name: rag-postgres
+    container_name: rag-db
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-admin}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-devpassword}"
-      POSTGRES_DB: "${POSTGRES_DB:-ragdb}"
-    ports: ["5434:5432"] # <--- CHANGED THIS TO 5433
-    volumes: ["postgres_data:/var/lib/postgresql/data"]
-    networks: ["rag-network"]
+      POSTGRES_DB: "${POSTGRES_DB:-verirag_db}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d verirag_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rag-network
 
-  mongo:
+  rag-mongo:
     image: mongo:6.0
     container_name: rag-mongo
-    ports: ["27017:27017"]
+    ports:
+      - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER:-admin}"
       MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD:-devpassword}"
-    volumes: ["mongo_data:/data/db"]
-    networks: ["rag-network"]
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - rag-network
 
-  backend:
+  # --- APPLICATION SERVICES ---
+  rag-backend:
     build: ./backend
     container_name: rag-backend
     command: python manage.py runserver 0.0.0.0:8000
@@ -54,21 +73,32 @@ services:
       - ./backend/media/pdfs:/app/pdfs
     ports:
       - "8000:8000"
-    env_file:           
+    env_file:
       - .env
     environment:
-      - POSTGRES_HOST=postgres
+      - DJANGO_SETTINGS_MODULE=rag_backend.settings
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-insecure-dev-key-change-in-prod}
+      - DEBUG=${DEBUG:-True}
+      - POSTGRES_HOST=rag-db
+      - POSTGRES_DB=${POSTGRES_DB:-verirag_db}
+      - POSTGRES_USER=${POSTGRES_USER:-admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
       - POSTGRES_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://rag-redis:6379/0
+      - CELERY_BROKER_URL=redis://rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://rag-redis:6379/0
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
     depends_on:
-      - postgres
-      - mongo
-      - vault
-      - redis
-    networks: ["rag-network"]
+      rag-db:
+        condition: service_healthy
+      rag-redis:
+        condition: service_healthy
+      rag-vault:
+        condition: service_started
+    networks:
+      - rag-network
 
-  celery-worker:
+  rag-celery-worker:
     build: ./backend
     container_name: rag-celery-worker
     command: celery -A rag_backend worker -l info -Q celery,ingestion,monitoring,maintenance
@@ -78,17 +108,22 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - POSTGRES_HOST=rag-db
+      - POSTGRES_DB=${POSTGRES_DB:-verirag_db}
+      - POSTGRES_USER=${POSTGRES_USER:-admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
+      - REDIS_URL=redis://rag-redis:6379/0
+      - CELERY_BROKER_URL=redis://rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://rag-redis:6379/0
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-insecure-dev-key}
     depends_on:
-      - redis
-      - postgres
-      - backend
-    networks: ["rag-network"]
+      - rag-redis
+      - rag-db
+      - rag-backend
+    networks:
+      - rag-network
 
-  celery-beat:
+  rag-celery-beat:
     build: ./backend
     container_name: rag-celery-beat
     command: celery -A rag_backend beat -l info
@@ -97,17 +132,22 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - POSTGRES_HOST=rag-db
+      - POSTGRES_DB=${POSTGRES_DB:-verirag_db}
+      - POSTGRES_USER=${POSTGRES_USER:-admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
+      - REDIS_URL=redis://rag-redis:6379/0
+      - CELERY_BROKER_URL=redis://rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://rag-redis:6379/0
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-insecure-dev-key}
     depends_on:
-      - redis
-      - celery-worker
-    networks: ["rag-network"]
+      - rag-redis
+      - rag-celery-worker
+    networks:
+      - rag-network
 
-  # FIXED: Indentation aligned to the left
-  prometheus:
+  # --- OBSERVABILITY STACK ---
+  rag-prometheus:
     image: prom/prometheus:v2.45.0
     container_name: rag-prometheus
     volumes:
@@ -117,8 +157,7 @@ services:
     networks:
       - rag-network
 
-  # FIXED: Indentation aligned to the left
-  grafana:
+  rag-grafana:
     image: grafana/grafana:10.0.0
     container_name: rag-grafana
     ports:
@@ -128,12 +167,10 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana_data:/var/lib/grafana
+    depends_on:
+      - rag-prometheus
     networks:
       - rag-network
-    depends_on:
-      - prometheus
-      - mongo
-      - vault
 
 volumes:
   postgres_data:

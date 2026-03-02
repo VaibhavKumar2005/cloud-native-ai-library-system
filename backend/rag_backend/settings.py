@@ -83,10 +83,10 @@ WSGI_APPLICATION = 'rag_backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('POSTGRES_DB', 'verirag_db'),       # Fixed: was 'library_db'
+        'NAME': os.environ.get('POSTGRES_DB', 'verirag_db'),
         'USER': os.environ.get('POSTGRES_USER', 'admin'),
         'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'devpassword'),
-        'HOST': os.environ.get('POSTGRES_HOST', 'rag-db'),          # Fixed: was 'postgres'
+        'HOST': os.environ.get('POSTGRES_HOST', 'rag-db'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
     }
 }
@@ -130,8 +130,8 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --- 7. CELERY CONFIGURATION ---
-CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://rag-redis:6379/0')      # Fixed: uses REDIS_URL
-CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://rag-redis:6379/0')  # Fixed: uses REDIS_URL
+CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'redis://rag-redis:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL', 'redis://rag-redis:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'

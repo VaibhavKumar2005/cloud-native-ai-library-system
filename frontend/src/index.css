@@ -66,7 +66,7 @@
 
 :root {
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
-  background-color: #020617;
+  background-color: #040207;
   color: #f8fafc;
 }
 
@@ -81,12 +81,67 @@ body {
   width: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #020617;
+  background: #040207;
 }
 ::-webkit-scrollbar-thumb {
   background: #334155;
   border-radius: 5px;
-  border: 2px solid #020617;
+  border: 2px solid #040207;
+}
+
+/* === Bento Grid Glass Cards === */
+.bento-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1.25rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.bento-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* === Animated Gauge === */
+@keyframes gauge-fill {
+  from { stroke-dashoffset: 283; }
+}
+@keyframes pulse-glow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.4)); }
+  50% { filter: drop-shadow(0 0 20px rgba(16, 185, 129, 0.7)); }
+}
+.gauge-ring {
+  animation: gauge-fill 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.gauge-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+/* === Gradient Orb Backgrounds === */
+@keyframes orb-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -20px) scale(1.05); }
+  66% { transform: translate(-15px, 15px) scale(0.95); }
+}
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.15;
+  animation: orb-float 20s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* === Area Chart Gradient === */
+@keyframes area-reveal {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+.area-chart-animate {
+  animation: area-reveal 1.2s ease-out forwards;
 }
 
 

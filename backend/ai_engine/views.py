@@ -6,12 +6,14 @@ Provides secure document management, AI chat, and system telemetry.
 import hvac
 import logging
 import os
+import time
+import redis
 from django.db import connections
 from django.db.utils import OperationalError
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes, action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from prometheus_client import REGISTRY
 from ai_engine.models import Document
@@ -265,3 +267,86 @@ def process_document(request):
         "message": result.get("message"),
         "chunks_created": result.get("chunks_created", 0)
     })
+
+
+# ============================================================================
+# 5. PUBLIC HEALTH CHECK (for K8s Probes & Load Balancers)
+# ============================================================================
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    """
+    GET /api/health/
+
+    Public endpoint for Kubernetes readiness/liveness probes.
+    Checks Redis, PostgreSQL, and Vault in parallel and returns
+    per-service status with latency measurements.
+    """
+    checks = {}
+    overall_healthy = True
+
+    # ── PostgreSQL ───────────────────────────────────────────────────
+    t0 = time.monotonic()
+    try:
+        connections['default'].cursor().execute("SELECT 1")
+        checks['postgresql'] = {
+            'status': 'healthy',
+            'latency_ms': round((time.monotonic() - t0) * 1000, 2),
+        }
+    except Exception as e:
+        overall_healthy = False
+        checks['postgresql'] = {
+            'status': 'unhealthy',
+            'latency_ms': round((time.monotonic() - t0) * 1000, 2),
+            'error': str(e),
+        }
+
+    # ── Redis ────────────────────────────────────────────────────────
+    t0 = time.monotonic()
+    try:
+        redis_url = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+        r = redis.from_url(redis_url, socket_connect_timeout=3)
+        r.ping()
+        checks['redis'] = {
+            'status': 'healthy',
+            'latency_ms': round((time.monotonic() - t0) * 1000, 2),
+        }
+    except Exception as e:
+        overall_healthy = False
+        checks['redis'] = {
+            'status': 'unhealthy',
+            'latency_ms': round((time.monotonic() - t0) * 1000, 2),
+            'error': str(e),
+        }
+
+    # ── HashiCorp Vault ──────────────────────────────────────────────
+    t0 = time.monotonic()
+    try:
+        vault_url = os.environ.get('VAULT_ADDR', 'http://vault:8200')
+        client = hvac.Client(url=vault_url)
+        seal_status = client.sys.read_seal_status()
+        vault_healthy = not seal_status.get('sealed', True)
+        checks['vault'] = {
+            'status': 'healthy' if vault_healthy else 'sealed',
+            'latency_ms': round((time.monotonic() - t0) * 1000, 2),
+        }
+        if not vault_healthy:
+            overall_healthy = False
+    except Exception as e:
+        # Vault being unreachable is a warning, not necessarily fatal
+        checks['vault'] = {
+            'status': 'unreachable',
+            'latency_ms': round((time.monotonic() - t0) * 1000, 2),
+            'error': str(e),
+        }
+        # In dev mode, don't fail health for vault
+        if os.environ.get('DEBUG', 'False') != 'True':
+            overall_healthy = False
+
+    http_status = status.HTTP_200_OK if overall_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return Response({
+        'healthy': overall_healthy,
+        'services': checks,
+    }, status=http_status)

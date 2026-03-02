@@ -1,0 +1,233 @@
+###############################################################################
+# VeriRAG — GitOps CI/CD Pipeline
+# Builds Docker images, pushes to ACR, updates image tags in k8s-manifests repo
+# Follows AZ-400 best practices: no secrets in logs, minimal permissions
+###############################################################################
+name: VeriRAG CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+
+env:
+  ACR_NAME: acrvaibhavrag2026
+  ACR_LOGIN_SERVER: acrvaibhavrag2026.azurecr.io
+  BACKEND_IMAGE: verirag-backend
+  FRONTEND_IMAGE: verirag-frontend
+  K8S_MANIFESTS_REPO: VaibhavKumar2005/verirag-k8s-manifests
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # Required for OIDC login to Azure
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 1: Lint & Test
+  # ═══════════════════════════════════════════════════════════════════════════
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: verirag_db
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U admin -d verirag_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run Django tests
+        env:
+          DJANGO_SETTINGS_MODULE: rag_backend.settings
+          DJANGO_SECRET_KEY: ci-test-key-not-for-production
+          DEBUG: 'True'
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5432'
+          POSTGRES_DB: verirag_db
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: testpassword
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          cd backend
+          python manage.py test --verbosity=2 --no-input
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend lint & build check
+        run: |
+          cd frontend
+          npm ci --no-audit
+          npm run build
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 2: Build & Push Docker Images to ACR
+  # ═══════════════════════════════════════════════════════════════════════════
+  build-and-push:
+    name: Build & Push to ACR
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      image_tag: ${{ steps.meta.outputs.sha_short }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate image tag
+        id: meta
+        run: |
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      # Option A: Service Principal login (set up AZURE_CREDENTIALS secret)
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      # ── Build & Push Backend ────────────────────────────────────────────
+      - name: Build & push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.sha_short }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:latest
+
+      # ── Build & Push Frontend ───────────────────────────────────────────
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL || 'https://api.verirag.dev' }}
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.sha_short }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE }}:latest
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 3: Update K8s Manifests Repository (GitOps)
+  # ═══════════════════════════════════════════════════════════════════════════
+  update-manifests:
+    name: Update K8s Manifests
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout manifests repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.K8S_MANIFESTS_REPO }}
+          token: ${{ secrets.MANIFESTS_PAT }}
+          path: manifests
+
+      - name: Update image tags in Kustomization
+        run: |
+          cd manifests
+          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+
+          # Update kustomization.yaml image tags
+          if [ -f kustomization.yaml ]; then
+            sed -i "s|newTag: .*|newTag: ${TAG}|g" kustomization.yaml
+          fi
+
+          # Update Helm values if present
+          if [ -f helm/verirag/values-production.yaml ]; then
+            sed -i "s|tag: .*|tag: \"${TAG}\"|g" helm/verirag/values-production.yaml
+          fi
+
+          echo "Updated image tags to: ${TAG}"
+
+      - name: Commit & push manifest changes
+        run: |
+          cd manifests
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "chore(ci): update image tag to ${{ needs.build-and-push.outputs.image_tag }}
+
+          Triggered by: ${{ github.event.head_commit.message }}
+          Source commit: ${{ github.sha }}
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git push
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 4: Security Scan (AZ-400 compliance)
+  # ═══════════════════════════════════════════════════════════════════════════
+  security-scan:
+    name: Security Scan
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner (Backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }}'
+          format: 'sarif'
+          output: 'trivy-backend.sarif'
+          severity: 'CRITICAL,HIGH'
+        env:
+          TRIVY_USERNAME: ${{ secrets.ACR_USERNAME }}
+          TRIVY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-backend.sarif'

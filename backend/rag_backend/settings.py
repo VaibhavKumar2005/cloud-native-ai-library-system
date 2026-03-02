@@ -1,17 +1,47 @@
 """
 Django settings for VeriRag project.
 Production-grade configuration for a Cloud-Native AI Library System.
+
+Security model:
+  - API keys (Gemini, Groq) live in HashiCorp Vault at secret/myapp.
+  - .env only carries VAULT_ADDR + VAULT_TOKEN — never raw API keys.
+  - DB credentials use env vars in dev; in production, Vault or Azure Key Vault.
 """
 import os
+import logging
 import secrets
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment variables from the root .env
 load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
+
+# --- 0. VAULT BOOTSTRAP (run before anything that might need secrets) ---
+VAULT_ADDR = os.environ.get('VAULT_ADDR', 'http://rag-vault:8200')
+VAULT_TOKEN = os.environ.get('VAULT_TOKEN')
+
+
+def _vault_read(key_name: str) -> str | None:
+    """Retrieve a single key from Vault KV v2 at secret/myapp."""
+    try:
+        import hvac
+        if not VAULT_TOKEN:
+            return None
+        client = hvac.Client(url=VAULT_ADDR, token=VAULT_TOKEN)
+        if not client.is_authenticated():
+            return None
+        resp = client.secrets.kv.v2.read_secret_version(
+            path='myapp', mount_point='secret'
+        )
+        return resp['data']['data'].get(key_name)
+    except Exception as exc:
+        logger.warning("Vault read for %s failed: %s", key_name, exc)
+        return None
 
 # --- 1. CORE SECURITY ---
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'

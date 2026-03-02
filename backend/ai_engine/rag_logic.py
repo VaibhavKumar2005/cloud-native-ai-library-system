@@ -78,9 +78,9 @@ ACTIVE_MODEL.set(1)  # Default to Gemini
 # ============================================================================
 DB_USER = os.environ.get("POSTGRES_USER", "admin")
 DB_PASS = os.environ.get("POSTGRES_PASSWORD", "devpassword")
-DB_HOST = os.environ.get("POSTGRES_HOST", "postgres")
+DB_HOST = os.environ.get("POSTGRES_HOST", "rag-db")
 DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
-DB_NAME = os.environ.get("POSTGRES_DB", "library_db")
+DB_NAME = os.environ.get("POSTGRES_DB", "verirag_db")
 
 CONNECTION_STRING = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 COLLECTION_NAME = "rag_collection"
@@ -92,57 +92,74 @@ SIMILARITY_THRESHOLD = 0.7    # Minimum similarity score for context
 # ============================================================================
 # VAULT INTEGRATION - SECURE API KEY RETRIEVAL
 # ============================================================================
-_api_key_cache = {"key": None, "timestamp": 0}
+_api_key_cache = {}  # Per-key cache: { "KEY_NAME": { "value": ..., "ts": ... } }
 CACHE_TTL = 300  # 5 minutes
+
+
+def _get_vault_client():
+    """
+    Creates and validates a Vault client connection.
+    Returns (client, error_message) tuple.
+    """
+    vault_url = os.environ.get('VAULT_ADDR', 'http://rag-vault:8200')
+    vault_token = os.environ.get('VAULT_TOKEN')
+
+    if not vault_token:
+        return None, "VAULT_TOKEN not set"
+
+    try:
+        client = hvac.Client(url=vault_url, token=vault_token)
+        if not client.is_authenticated():
+            return None, "Vault authentication failed"
+        return client, None
+    except Exception as e:
+        return None, str(e)
+
 
 def get_api_key_from_vault(key_name="GOOGLE_API_KEY"):
     """
-    Retrieves API keys dynamically from HashiCorp Vault with caching.
+    Retrieves API keys dynamically from HashiCorp Vault with per-key caching.
     Falls back to environment variables if Vault is unavailable.
+
+    Vault path: secret/data/myapp  (KV v2)
+    Expected keys: GOOGLE_API_KEY, GROQ_API_KEY
     """
     import time
-    
-    cache_key = f"{key_name}_cached"
+
     current_time = time.time()
-    
-    # Check cache first
-    if _api_key_cache.get(cache_key) and (current_time - _api_key_cache.get("timestamp", 0)) < CACHE_TTL:
-        return _api_key_cache[cache_key]
-    
+
+    # Check per-key cache first
+    cached = _api_key_cache.get(key_name)
+    if cached and (current_time - cached["ts"]) < CACHE_TTL:
+        return cached["value"]
+
     try:
-        vault_url = os.environ.get('VAULT_ADDR', 'http://vault:8200')
-        vault_token = os.environ.get('VAULT_TOKEN')
-        
-        if not vault_token:
-            logger.warning("VAULT_TOKEN not set, falling back to environment variables")
+        client, err = _get_vault_client()
+        if client is None:
+            logger.warning(f"Vault unavailable ({err}), falling back to env for {key_name}")
             return os.environ.get(key_name)
-        
-        client = hvac.Client(url=vault_url, token=vault_token)
-        
-        if not client.is_authenticated():
-            logger.error("Vault authentication failed")
-            return os.environ.get(key_name)
-        
-        # Try to read from KV v2 secrets engine
+
+        # Read from KV v2 secrets engine
         secret_response = client.secrets.kv.v2.read_secret_version(
             path='myapp',
             mount_point='secret'
         )
-        
+
         api_key = secret_response['data']['data'].get(key_name)
-        
+
         if api_key:
-            # Cache the successful retrieval
-            _api_key_cache[cache_key] = api_key
-            _api_key_cache["timestamp"] = current_time
-            logger.info(f"✅ Successfully retrieved {key_name} from Vault")
+            _api_key_cache[key_name] = {"value": api_key, "ts": current_time}
+            logger.info(f"✅ Retrieved {key_name} from Vault (cached for {CACHE_TTL}s)")
             return api_key
-        
+
         logger.warning(f"{key_name} not found in Vault, falling back to environment")
         return os.environ.get(key_name)
-        
+
+    except hvac.exceptions.VaultError as ve:
+        logger.error(f"Vault API error for {key_name}: {ve} — falling back to env")
+        return os.environ.get(key_name)
     except Exception as e:
-        logger.error(f"Vault Security Error: {str(e)} - Falling back to environment variable")
+        logger.error(f"Vault connection error for {key_name}: {e} — falling back to env")
         return os.environ.get(key_name)
 
 

@@ -59,6 +59,7 @@ docker exec $CONTAINER_NAME vault secrets enable -path=secret kv-v2 2>$null
 
 # 6. Inject Secrets
 $google_api_key = Read-Host "Please enter your GOOGLE_API_KEY (starts with AIza...)"
+$groq_api_key = Read-Host "Please enter your GROQ_API_KEY (from console.groq.com)"
 
 Write-Host "💉 Injecting secrets into 'secret/data/myapp'..."
 
@@ -66,11 +67,12 @@ Write-Host "💉 Injecting secrets into 'secret/data/myapp'..."
 $secrets = @{
     data = @{
         GOOGLE_API_KEY = $google_api_key
-        DB_NAME = "vectordb"
-        DB_USER = "postgres"
-        DB_PASSWORD = "password"
-        DB_HOST = "db"
-        DB_PORT = "5432"
+        GROQ_API_KEY   = $groq_api_key
+        DB_NAME        = "verirag_db"
+        DB_USER        = "admin"
+        DB_PASSWORD    = "devpassword"
+        DB_HOST        = "rag-db"
+        DB_PORT        = "5432"
     }
 }
 # Convert to JSON

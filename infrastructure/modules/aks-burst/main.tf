@@ -124,14 +124,12 @@ resource "azurerm_kubernetes_cluster" "aks" {
   tags                = local.common_tags
 
   default_node_pool {
-    name                = "system"
-    node_count          = var.node_count
-    vm_size             = var.vm_size
-    os_disk_size_gb     = 128
-    max_pods            = 50
-    enable_auto_scaling = true
-    min_count           = 1
-    max_count           = 5
+    name            = "system"
+    vm_size         = var.vm_size
+    os_disk_size_gb = 128
+    max_pods        = 50
+    min_count       = 1
+    max_count       = 5
 
     upgrade_settings {
       max_surge = "33%"
@@ -169,7 +167,6 @@ resource "azurerm_kubernetes_cluster_node_pool" "workers" {
   kubernetes_cluster_id = azurerm_kubernetes_cluster.aks.id
   vm_size               = "Standard_D8s_v5"
   os_disk_size_gb       = 128
-  enable_auto_scaling   = true
   min_count             = 0    # Scale to zero when not needed
   max_count             = 10
   mode                  = "User"

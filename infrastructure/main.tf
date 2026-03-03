@@ -75,6 +75,12 @@ variable "pg_admin_password" {
   sensitive   = true
 }
 
+variable "django_secret_key" {
+  description = "Django SECRET_KEY — generate with: python -c 'import secrets; print(secrets.token_urlsafe(50))'"
+  type        = string
+  sensitive   = true
+}
+
 variable "acr_name" {
   description = "Globally unique ACR name"
   type        = string
@@ -225,6 +231,17 @@ resource "azurerm_key_vault_secret" "redis_connection" {
   key_vault_id = azurerm_key_vault.kv.id
 }
 
+resource "azurerm_key_vault_secret" "django_secret" {
+  name         = "DJANGO-SECRET-KEY"
+  value        = var.django_secret_key
+  key_vault_id = azurerm_key_vault.kv.id
+}
+
+# API keys — populated manually via Azure Portal or CLI after initial apply.
+# terraform apply does NOT inject these; they are set via:
+#   az keyvault secret set --vault-name kv-verirag-dev --name GOOGLE-API-KEY --value <key>
+#   az keyvault secret set --vault-name kv-verirag-dev --name GROQ-API-KEY --value <key>
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 7. AZURE CONTAINER APPS ENVIRONMENT (Scale-to-Zero)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -284,12 +301,20 @@ resource "azurerm_container_app" "backend" {
         secret_name = "pg-password"
       }
       env {
-        name  = "REDIS_URL"
-        value = "rediss://:${azurerm_redis_cache.redis.primary_access_key}@${azurerm_redis_cache.redis.hostname}:${azurerm_redis_cache.redis.ssl_port}/0"
+        name        = "REDIS_URL"
+        secret_name = "redis-url"
+      }
+      env {
+        name        = "CELERY_BROKER_URL"
+        secret_name = "redis-url"
       }
       env {
         name  = "AZURE_KEY_VAULT_URL"
         value = azurerm_key_vault.kv.vault_uri
+      }
+      env {
+        name        = "DJANGO_SECRET_KEY"
+        secret_name = "django-secret-key"
       }
     }
 
@@ -307,6 +332,14 @@ resource "azurerm_container_app" "backend" {
   secret {
     name  = "pg-password"
     value = var.pg_admin_password
+  }
+  secret {
+    name  = "redis-url"
+    value = "rediss://:${azurerm_redis_cache.redis.primary_access_key}@${azurerm_redis_cache.redis.hostname}:${azurerm_redis_cache.redis.ssl_port}/0"
+  }
+  secret {
+    name  = "django-secret-key"
+    value = var.django_secret_key
   }
   secret {
     name  = "acr-password"
@@ -381,12 +414,12 @@ resource "azurerm_container_app" "celery_worker" {
         secret_name = "pg-password"
       }
       env {
-        name  = "REDIS_URL"
-        value = "rediss://:${azurerm_redis_cache.redis.primary_access_key}@${azurerm_redis_cache.redis.hostname}:${azurerm_redis_cache.redis.ssl_port}/0"
+        name        = "REDIS_URL"
+        secret_name = "redis-url"
       }
       env {
-        name  = "CELERY_BROKER_URL"
-        value = "rediss://:${azurerm_redis_cache.redis.primary_access_key}@${azurerm_redis_cache.redis.hostname}:${azurerm_redis_cache.redis.ssl_port}/0"
+        name        = "CELERY_BROKER_URL"
+        secret_name = "redis-url"
       }
       env {
         name  = "AZURE_KEY_VAULT_URL"
@@ -395,14 +428,18 @@ resource "azurerm_container_app" "celery_worker" {
     }
 
     # KEDA: Scale based on Redis queue length
+    # Authentication via secret reference — no inline credentials
     custom_scale_rule {
       name             = "redis-queue-scaler"
       custom_rule_type = "redis"
       metadata = {
-        host          = "rediss://:${azurerm_redis_cache.redis.primary_access_key}@${azurerm_redis_cache.redis.hostname}:${azurerm_redis_cache.redis.ssl_port}"
-        listName      = "celery"
-        listLength    = "5"
-        enableTLS     = "true"
+        listName   = "celery"
+        listLength = "5"
+        enableTLS  = "true"
+      }
+      authentication {
+        secret_name       = "redis-url"
+        trigger_parameter = "host"
       }
     }
   }
@@ -414,6 +451,10 @@ resource "azurerm_container_app" "celery_worker" {
   secret {
     name  = "pg-password"
     value = var.pg_admin_password
+  }
+  secret {
+    name  = "redis-url"
+    value = "rediss://:${azurerm_redis_cache.redis.primary_access_key}@${azurerm_redis_cache.redis.hostname}:${azurerm_redis_cache.redis.ssl_port}/0"
   }
   secret {
     name  = "acr-password"

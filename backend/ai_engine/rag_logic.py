@@ -90,15 +90,25 @@ FAITHFULNESS_THRESHOLD = 0.6  # Below this triggers fallback
 SIMILARITY_THRESHOLD = 0.7    # Minimum similarity score for context
 
 # ============================================================================
-# VAULT INTEGRATION - SECURE API KEY RETRIEVAL
+# DUAL-MODE SECRET RETRIEVAL
+# ============================================================================
+# Detects DEPLOY_MODE to choose HashiCorp Vault (local) or Azure Key Vault (cloud).
+# API keys are NEVER stored in .env or environment variables.
 # ============================================================================
 _api_key_cache = {}  # Per-key cache: { "KEY_NAME": { "value": ..., "ts": ... } }
 CACHE_TTL = 300  # 5 minutes
 
+DEPLOY_MODE = os.environ.get('DEPLOY_MODE', 'local').lower()
+AZURE_KEY_VAULT_URL = os.environ.get('AZURE_KEY_VAULT_URL')
+
+# Override: if AZURE_KEY_VAULT_URL is set, treat as cloud
+if AZURE_KEY_VAULT_URL:
+    DEPLOY_MODE = 'cloud'
+
 
 def _get_vault_client():
     """
-    Creates and validates a Vault client connection.
+    Creates and validates a HashiCorp Vault client connection (local mode only).
     Returns (client, error_message) tuple.
     """
     vault_url = os.environ.get('VAULT_ADDR', 'http://rag-vault:8200')
@@ -118,10 +128,14 @@ def _get_vault_client():
 
 def get_api_key_from_vault(key_name="GOOGLE_API_KEY"):
     """
-    Retrieves API keys dynamically from HashiCorp Vault with per-key caching.
-    Falls back to environment variables if Vault is unavailable.
+    Retrieves API keys from the active secret backend with per-key caching.
 
-    Vault path: secret/data/myapp  (KV v2)
+    Dual-mode:
+      - DEPLOY_MODE=local  → HashiCorp Vault KV v2 at secret/myapp
+      - DEPLOY_MODE=cloud  → Azure Key Vault (via DefaultAzureCredential)
+
+    Falls back to environment variables ONLY if both vault backends fail.
+
     Expected keys: GOOGLE_API_KEY, GROQ_API_KEY
     """
     import time
@@ -133,34 +147,55 @@ def get_api_key_from_vault(key_name="GOOGLE_API_KEY"):
     if cached and (current_time - cached["ts"]) < CACHE_TTL:
         return cached["value"]
 
-    try:
-        client, err = _get_vault_client()
-        if client is None:
-            logger.warning(f"Vault unavailable ({err}), falling back to env for {key_name}")
-            return os.environ.get(key_name)
+    api_key = None
 
-        # Read from KV v2 secrets engine
-        secret_response = client.secrets.kv.v2.read_secret_version(
-            path='myapp',
-            mount_point='secret'
-        )
+    if DEPLOY_MODE == 'cloud' and AZURE_KEY_VAULT_URL:
+        # ── Azure Key Vault path ──
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
 
-        api_key = secret_response['data']['data'].get(key_name)
+            client = SecretClient(
+                vault_url=AZURE_KEY_VAULT_URL,
+                credential=DefaultAzureCredential(),
+            )
+            azure_secret_name = key_name.replace('_', '-')  # GOOGLE_API_KEY → GOOGLE-API-KEY
+            api_key = client.get_secret(azure_secret_name).value
+            if api_key:
+                _api_key_cache[key_name] = {"value": api_key, "ts": current_time}
+                logger.info(f"✅ Retrieved {key_name} from Azure Key Vault (cached for {CACHE_TTL}s)")
+                return api_key
+        except ImportError:
+            logger.error("azure-identity or azure-keyvault-secrets not installed")
+        except Exception as e:
+            logger.error(f"Azure Key Vault error for {key_name}: {e}")
+    else:
+        # ── HashiCorp Vault path (local mode) ──
+        try:
+            client, err = _get_vault_client()
+            if client is None:
+                logger.warning(f"Vault unavailable ({err}), falling back to env for {key_name}")
+                return os.environ.get(key_name)
 
-        if api_key:
-            _api_key_cache[key_name] = {"value": api_key, "ts": current_time}
-            logger.info(f"✅ Retrieved {key_name} from Vault (cached for {CACHE_TTL}s)")
-            return api_key
+            secret_response = client.secrets.kv.v2.read_secret_version(
+                path='myapp',
+                mount_point='secret'
+            )
 
-        logger.warning(f"{key_name} not found in Vault, falling back to environment")
-        return os.environ.get(key_name)
+            api_key = secret_response['data']['data'].get(key_name)
 
-    except hvac.exceptions.VaultError as ve:
-        logger.error(f"Vault API error for {key_name}: {ve} — falling back to env")
-        return os.environ.get(key_name)
-    except Exception as e:
-        logger.error(f"Vault connection error for {key_name}: {e} — falling back to env")
-        return os.environ.get(key_name)
+            if api_key:
+                _api_key_cache[key_name] = {"value": api_key, "ts": current_time}
+                logger.info(f"✅ Retrieved {key_name} from Vault (cached for {CACHE_TTL}s)")
+                return api_key
+
+        except hvac.exceptions.VaultError as ve:
+            logger.error(f"Vault API error for {key_name}: {ve}")
+        except Exception as e:
+            logger.error(f"Vault connection error for {key_name}: {e}")
+
+    logger.warning(f"{key_name} not found in vault, falling back to environment")
+    return os.environ.get(key_name)
 
 
 def get_groq_api_key():

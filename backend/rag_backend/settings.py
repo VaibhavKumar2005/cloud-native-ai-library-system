@@ -2,10 +2,18 @@
 Django settings for VeriRag project.
 Production-grade configuration for a Cloud-Native AI Library System.
 
-Security model:
-  - API keys (Gemini, Groq) live in HashiCorp Vault at secret/myapp.
-  - .env only carries VAULT_ADDR + VAULT_TOKEN — never raw API keys.
-  - DB credentials use env vars in dev; in production, Vault or Azure Key Vault.
+Security model — Dual-Mode Secret Detection:
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  DEPLOY_MODE=local  →  HashiCorp Vault (rag-vault container)   │
+  │  DEPLOY_MODE=cloud  →  Azure Key Vault (managed identity)      │
+  └──────────────────────────────────────────────────────────────────┘
+
+  - API keys (Gemini, Groq) NEVER live in .env or environment vars.
+  - In local mode:  hvac reads from Vault KV v2 at secret/myapp.
+  - In cloud mode:  azure-identity + azure-keyvault-secrets reads
+                    from the Key Vault URL in AZURE_KEY_VAULT_URL.
+  - DB credentials use env vars (injected by ACA secrets / K8s
+    ExternalSecrets in cloud, or docker-compose .env in local).
 """
 import os
 import logging
@@ -21,19 +29,35 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from the root .env
 load_dotenv(os.path.join(BASE_DIR.parent, '.env'))
 
-# --- 0. VAULT BOOTSTRAP (run before anything that might need secrets) ---
+# ──────────────────────────────────────────────
+# 0. DEPLOY MODE DETECTION
+# ──────────────────────────────────────────────
+DEPLOY_MODE = os.environ.get('DEPLOY_MODE', 'local').lower()  # "local" | "cloud"
+AZURE_KEY_VAULT_URL = os.environ.get('AZURE_KEY_VAULT_URL')
+
+# Override: if AZURE_KEY_VAULT_URL is set, treat as cloud regardless
+if AZURE_KEY_VAULT_URL:
+    DEPLOY_MODE = 'cloud'
+
+# ──────────────────────────────────────────────
+# 0a. VAULT CLIENT — LOCAL MODE (HashiCorp Vault)
+# ──────────────────────────────────────────────
 VAULT_ADDR = os.environ.get('VAULT_ADDR', 'http://rag-vault:8200')
 VAULT_TOKEN = os.environ.get('VAULT_TOKEN')
 
 
 def _vault_read(key_name: str) -> str | None:
-    """Retrieve a single key from Vault KV v2 at secret/myapp."""
+    """Retrieve a single key from HashiCorp Vault KV v2 at secret/myapp."""
+    if DEPLOY_MODE != 'local':
+        return None
     try:
         import hvac
         if not VAULT_TOKEN:
+            logger.warning("VAULT_TOKEN not set — cannot read secrets from Vault")
             return None
         client = hvac.Client(url=VAULT_ADDR, token=VAULT_TOKEN)
         if not client.is_authenticated():
+            logger.warning("Vault authentication failed")
             return None
         resp = client.secrets.kv.v2.read_secret_version(
             path='myapp', mount_point='secret'
@@ -42,6 +66,61 @@ def _vault_read(key_name: str) -> str | None:
     except Exception as exc:
         logger.warning("Vault read for %s failed: %s", key_name, exc)
         return None
+
+
+# ──────────────────────────────────────────────
+# 0b. VAULT CLIENT — CLOUD MODE (Azure Key Vault)
+# ──────────────────────────────────────────────
+_azure_kv_client = None
+
+if DEPLOY_MODE == 'cloud' and AZURE_KEY_VAULT_URL:
+    try:
+        from azure.identity import DefaultAzureCredential
+        from azure.keyvault.secrets import SecretClient
+
+        _azure_kv_client = SecretClient(
+            vault_url=AZURE_KEY_VAULT_URL,
+            credential=DefaultAzureCredential(),
+        )
+        logger.info("Azure Key Vault client initialized: %s", AZURE_KEY_VAULT_URL)
+    except ImportError:
+        logger.error(
+            "azure-identity or azure-keyvault-secrets not installed. "
+            "Install with: pip install azure-identity azure-keyvault-secrets"
+        )
+    except Exception as exc:
+        logger.error("Azure Key Vault initialization failed: %s", exc)
+
+
+def _azure_kv_read(secret_name: str) -> str | None:
+    """Retrieve a secret from Azure Key Vault. Names use hyphens (e.g. GOOGLE-API-KEY)."""
+    if not _azure_kv_client:
+        return None
+    try:
+        return _azure_kv_client.get_secret(secret_name).value
+    except Exception as exc:
+        logger.warning("Azure Key Vault read for %s failed: %s", secret_name, exc)
+        return None
+
+
+# ──────────────────────────────────────────────
+# 0c. UNIFIED SECRET READER
+# ──────────────────────────────────────────────
+def get_secret(vault_key: str, azure_key: str | None = None) -> str | None:
+    """
+    Fetch a secret from the active vault backend.
+
+    Args:
+        vault_key:  Key name in HashiCorp Vault KV (e.g. "GOOGLE_API_KEY")
+        azure_key:  Key name in Azure Key Vault (e.g. "GOOGLE-API-KEY").
+                    Defaults to vault_key with underscores → hyphens.
+    """
+    if azure_key is None:
+        azure_key = vault_key.replace('_', '-')
+
+    if DEPLOY_MODE == 'cloud':
+        return _azure_kv_read(azure_key)
+    return _vault_read(vault_key)
 
 # --- 1. CORE SECURITY ---
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
@@ -110,12 +189,18 @@ TEMPLATES = [
 WSGI_APPLICATION = 'rag_backend.wsgi.application'
 
 # --- 3. DATABASE (PostgreSQL / PGVector) ---
+# In cloud mode, credentials come from ACA secrets / Key Vault.
+# In local mode, credentials come from .env via docker-compose.
+_pg_password = os.environ.get('POSTGRES_PASSWORD') or get_secret('POSTGRES_PASSWORD')
+if not _pg_password and not DEBUG:
+    raise ValueError("POSTGRES_PASSWORD must be set via env var or vault in production.")
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('POSTGRES_DB', 'verirag_db'),
         'USER': os.environ.get('POSTGRES_USER', 'admin'),
-        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'devpassword'),
+        'PASSWORD': _pg_password or 'devpassword',  # fallback only when DEBUG=True
         'HOST': os.environ.get('POSTGRES_HOST', 'rag-db'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
     }

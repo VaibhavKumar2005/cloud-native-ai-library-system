@@ -311,3 +311,12 @@ FIXES_APPLIED.md
 vault/
 
 vault_keys.txt
+# --- Kubernetes Secrets (NEVER commit real secrets to Git) ---
+k8s/secrets.yaml
+**/secrets.yaml
+!**/secrets.yaml.example
+
+# --- Terraform state in submodules ---
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/.terraform/

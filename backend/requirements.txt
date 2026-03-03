@@ -30,7 +30,9 @@ prometheus-client>=0.19.0  # Required for custom counters, histograms, and REGIS
 drf-spectacular
 
 # Security & Secrets
-hvac>=2.1.0  # HashiCorp Vault client
+hvac>=2.1.0  # HashiCorp Vault client (local mode)
+azure-identity>=1.15.0  # Azure credential chain (cloud mode)
+azure-keyvault-secrets>=4.7.0  # Azure Key Vault secret reader (cloud mode)
 djangorestframework-simplejwt==5.3.1
 django-csp
 

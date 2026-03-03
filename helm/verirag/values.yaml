@@ -160,3 +160,17 @@ containerSecurityContext:
   capabilities:
     drop:
       - ALL
+
+# ── Secrets (MUST be overridden at install time — never commit real values) ─
+# Usage: helm install verirag ./helm/verirag \
+#   --set secrets.postgresPassword=xxx --set secrets.djangoSecretKey=xxx --set secrets.vaultToken=xxx
+secrets:
+  postgresUser: admin
+  postgresPassword: ""    # REQUIRED — helm will fail if empty
+  djangoSecretKey: ""     # REQUIRED — generate with: python -c "import secrets; print(secrets.token_urlsafe(50))"
+  vaultToken: ""          # REQUIRED in local mode
+
+# ── External Secrets (disabled in local mode) ──────────────────────────────
+externalSecrets:
+  enabled: false
+

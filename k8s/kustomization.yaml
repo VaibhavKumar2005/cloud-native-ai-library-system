@@ -19,5 +19,5 @@ commonLabels:
 
 # Image overrides — update tags for CI/CD pipelines
 images:
-  - name: acrvaibhavrag2026.azurecr.io/verirag-backend
+  - name: vaibhavkumar0412/verirag-backend
     newTag: latest

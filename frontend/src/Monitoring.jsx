@@ -19,10 +19,9 @@ import {
   Clock
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import api from '@/lib/api';
 
-const API_URL = "http://localhost:8000/api/system-insights/";
 const POLL_INTERVAL_MS = 10000;
-const TOKEN_KEY = "access_token";
 
 const Monitoring = () => {
   const navigate = useNavigate();
@@ -37,31 +36,9 @@ const Monitoring = () => {
 
   // ── Telemetry Logic ──────────────────────────────────────────────────
   const fetchInsights = useCallback(async (isInitial = false) => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    
-    if (!token) {
-      setFetchError("auth");
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      const res = await fetch(API_URL, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json'
-        },
-      });
-
-      if (res.status === 401) {
-        localStorage.removeItem(TOKEN_KEY);
-        navigate("/login");
-        return;
-      }
-
-      if (!res.ok) throw new Error(`Telemetry Link Offline (HTTP ${res.status})`);
-
-      const data = await res.json();
+      const res = await api.get('/api/system-insights/');
+      const data = res.data;
       setTelemetry(data);
       setFetchError(null);
       setLastUpdated(new Date());

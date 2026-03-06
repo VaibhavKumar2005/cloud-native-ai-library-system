@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def check_vault_status():
     """Check HashiCorp Vault connectivity and seal status."""
     try:
-        vault_url = os.environ.get('VAULT_ADDR', 'http://vault:8200')
+        vault_url = os.environ.get('VAULT_ADDR', 'http://rag-vault:8200')
         client = hvac.Client(url=vault_url)
         
         if not client.sys.is_initialized():
@@ -323,7 +323,7 @@ def health_check(request):
     # ── HashiCorp Vault ──────────────────────────────────────────────
     t0 = time.monotonic()
     try:
-        vault_url = os.environ.get('VAULT_ADDR', 'http://vault:8200')
+        vault_url = os.environ.get('VAULT_ADDR', 'http://rag-vault:8200')
         client = hvac.Client(url=vault_url)
         seal_status = client.sys.read_seal_status()
         vault_healthy = not seal_status.get('sealed', True)

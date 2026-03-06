@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import hvac  # For HashiCorp Vault
-import google.generativeai as genai
+from google import genai
 from openai import OpenAI  # Used for the Groq Fallback
 from prometheus_client import Counter, Histogram, Gauge
 from langchain_community.document_loaders import PyPDFLoader
@@ -210,7 +210,7 @@ def get_embedding_model():
         raise ValueError("GOOGLE_API_KEY is missing from Vault and environment!")
     
     return GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
+        model="models/gemini-embedding-001",
         google_api_key=api_key
     )
 
@@ -222,7 +222,13 @@ def ingest_document(doc_id):
     """
     Takes a Document ID and processes the PDF into vector embeddings.
     Uses LangChain's RecursiveCharacterTextSplitter for optimal chunking.
+    Processes in batches to respect API rate limits (free-tier: 100 req/min).
     """
+    import time as _time
+
+    BATCH_SIZE = 80  # chunks per batch (stay under 100 RPM limit)
+    BATCH_DELAY = 62  # seconds between batches
+
     try:
         doc = Document.objects.get(id=doc_id)
         file_path = doc.file.path
@@ -258,14 +264,41 @@ def ingest_document(doc_id):
             chunk.metadata["document_title"] = doc.title
             chunk.metadata["chunk_index"] = i
 
-        # Step 4: Generate embeddings and store in PGVector
-        PGVector.from_documents(
-            embedding=get_embedding_model(),
-            documents=chunks,
-            collection_name=COLLECTION_NAME,
-            connection_string=CONNECTION_STRING,
-            pre_delete_collection=False
-        )
+        # Step 4: Generate embeddings and store in PGVector (batched for rate limits)
+        embedding_model = get_embedding_model()
+        total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+        
+        for batch_idx in range(total_batches):
+            start = batch_idx * BATCH_SIZE
+            end = min(start + BATCH_SIZE, len(chunks))
+            batch = chunks[start:end]
+            
+            logger.info(f"📦 Processing batch {batch_idx + 1}/{total_batches} ({len(batch)} chunks)")
+            
+            # Retry logic for rate limit errors
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    PGVector.from_documents(
+                        embedding=embedding_model,
+                        documents=batch,
+                        collection_name=COLLECTION_NAME,
+                        connection_string=CONNECTION_STRING,
+                        pre_delete_collection=False
+                    )
+                    break  # Success
+                except Exception as e:
+                    if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
+                        wait_time = BATCH_DELAY * (attempt + 1)
+                        logger.warning(f"⏳ Rate limited, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                        _time.sleep(wait_time)
+                    else:
+                        raise  # Non-rate-limit error, propagate
+            
+            # Pause between batches (skip after last batch)
+            if batch_idx < total_batches - 1:
+                logger.info(f"⏳ Rate limit pause ({BATCH_DELAY}s) before next batch...")
+                _time.sleep(BATCH_DELAY)
 
         # Step 5: Update document status
         doc.processed = True
@@ -333,16 +366,28 @@ def process_pdf_to_vector_db(file_path, user_id=None):
 # ============================================================================
 # 2. LLM ROUTER WITH AUTOMATIC FAILOVER
 # ============================================================================
-def call_gemini(prompt, api_key):
-    """Primary LLM: Google Gemini with JSON mode."""
-    genai.configure(api_key=api_key)
+def call_gemini(prompt, api_key, _retries=2):
+    """Primary LLM: Google Gemini with JSON mode. Retries on 429 rate-limit."""
+    client = genai.Client(api_key=api_key)
     generation_config = {
         "temperature": 0.1,  # Low temperature for factual responses
         "response_mime_type": "application/json"
     }
-    model = genai.GenerativeModel('gemini-1.5-flash', generation_config=generation_config)
-    response = model.generate_content(prompt)
-    return response.text
+    for attempt in range(_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt,
+                config=generation_config
+            )
+            return response.text
+        except Exception as e:
+            if '429' in str(e) and attempt < _retries:
+                wait = 5 * (attempt + 1)
+                logger.warning(f"⏳ Gemini 429 — retrying in {wait}s (attempt {attempt+1}/{_retries})")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def call_groq_llama(prompt):
@@ -357,7 +402,7 @@ def call_groq_llama(prompt):
     )
     
     response = client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         messages=[
             {
                 "role": "system",

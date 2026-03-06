@@ -39,7 +39,7 @@ spec:
                 sleep 2
               done
         - name: run-migrations
-          image: acrvaibhavrag2026.azurecr.io/verirag-backend:latest
+          image: vaibhavkumar0412/verirag-backend:latest
           command: ["python", "manage.py", "migrate", "--noinput"]
           envFrom:
             - configMapRef:
@@ -48,7 +48,7 @@ spec:
                 name: verirag-secrets
       containers:
         - name: rag-backend
-          image: acrvaibhavrag2026.azurecr.io/verirag-backend:latest
+          image: vaibhavkumar0412/verirag-backend:latest
           ports:
             - containerPort: 8000
               protocol: TCP
@@ -121,7 +121,7 @@ spec:
               done
       containers:
         - name: celery-worker
-          image: acrvaibhavrag2026.azurecr.io/verirag-backend:latest
+          image: vaibhavkumar0412/verirag-backend:latest
           command:
             - celery
             - -A
@@ -175,7 +175,7 @@ spec:
     spec:
       containers:
         - name: celery-beat
-          image: acrvaibhavrag2026.azurecr.io/verirag-backend:latest
+          image: vaibhavkumar0412/verirag-backend:latest
           command:
             - celery
             - -A

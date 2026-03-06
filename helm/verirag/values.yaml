@@ -15,7 +15,7 @@ global:
 backend:
   replicaCount: 2
   image:
-    repository: acrvaibhavrag2026.azurecr.io/verirag-backend
+    repository: vaibhavkumar0412/verirag-backend
     tag: "latest"
   resources:
     requests:
@@ -39,7 +39,7 @@ frontend:
   enabled: true
   replicaCount: 1
   image:
-    repository: acrvaibhavrag2026.azurecr.io/verirag-frontend
+    repository: vaibhavkumar0412/verirag-frontend
     tag: "latest"
   resources:
     requests:

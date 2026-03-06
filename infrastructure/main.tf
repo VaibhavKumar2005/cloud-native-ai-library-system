@@ -268,7 +268,7 @@ resource "azurerm_container_app" "backend" {
 
     container {
       name   = "backend"
-      image  = "${azurerm_container_registry.acr.login_server}/verirag-backend:latest"
+      image  = "vaibhavkumar0412/verirag-backend:latest"
       cpu    = 0.5
       memory = "1Gi"
 
@@ -378,7 +378,7 @@ resource "azurerm_container_app" "celery_worker" {
 
     container {
       name   = "celery-worker"
-      image  = "${azurerm_container_registry.acr.login_server}/verirag-backend:latest"
+      image  = "vaibhavkumar0412/verirag-backend:latest"
       cpu    = 0.5
       memory = "1Gi"
 

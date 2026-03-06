@@ -6,7 +6,7 @@ Write-Host "🚀 Starting Vault Setup..." -ForegroundColor Cyan
 
 # 1. Ensure Vault container is running
 Write-Host "Checking Vault container..."
-docker-compose up -d vault
+docker-compose up -d rag-vault
 Start-Sleep -Seconds 5
 
 # 2. Check Vault Status

@@ -20,9 +20,7 @@ import {
   Download,
   Filter
 } from "lucide-react";
-
-const API_URL = "http://localhost:8000/api";
-const TOKEN_KEY = "access_token";
+import api from '@/lib/api';
 
 const Analytics = () => {
   const navigate = useNavigate();
@@ -35,32 +33,14 @@ const Analytics = () => {
 
   // Fetch all analytics data
   const fetchAnalytics = useCallback(async () => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     try {
       // Fetch system insights
-      const insightsRes = await fetch(`${API_URL}/system-insights/`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (insightsRes.status === 401) {
-        navigate("/login");
-        return;
-      }
-      
-      const insights = await insightsRes.json();
-      setSystemMetrics(insights);
+      const insightsRes = await api.get('/api/system-insights/');
+      setSystemMetrics(insightsRes.data);
 
       // Fetch documents
-      const docsRes = await fetch(`${API_URL}/documents/`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const docs = await docsRes.json();
-      setDocuments(docs);
+      const docsRes = await api.get('/api/documents/');
+      setDocuments(docsRes.data);
 
       // Fetch query history from localStorage (simulated - in production this would be an API)
       const storedHistory = JSON.parse(localStorage.getItem("verirag_query_history") || "[]");

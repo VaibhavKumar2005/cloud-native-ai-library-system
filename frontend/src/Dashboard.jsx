@@ -9,7 +9,7 @@ import {
   Cpu, Database, Lock, Zap, BrainCircuit, TrendingUp, ArrowUpRight,
   ArrowDownRight, Sparkles, Clock, Search
 } from "lucide-react"
-import axios from 'axios'
+import api from '@/lib/api'
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MICRO-COMPONENTS — Premium UI building blocks
@@ -207,20 +207,14 @@ export default function Dashboard({ onLogout }) {
   // ── Data Fetching ───────────────────────────────────────────────────
   const fetchDocuments = useCallback(async () => {
     try {
-      const token = localStorage.getItem('access_token')
-      const res = await axios.get('http://localhost:8000/api/documents/', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      const res = await api.get('/api/documents/')
       setDocuments(res.data)
     } catch (err) { console.error("Sync error", err) }
   }, [])
 
   const fetchSystemMetrics = useCallback(async () => {
     try {
-      const token = localStorage.getItem('access_token')
-      const res = await axios.get('http://localhost:8000/api/system-insights/', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      const res = await api.get('/api/system-insights/')
       setSystemMetrics(res.data)
       setMetricsLoaded(true)
     } catch { /* silent */ }
@@ -250,9 +244,8 @@ export default function Dashboard({ onLogout }) {
     formData.append('file', selectedFile)
     formData.append('title', selectedFile.name)
     try {
-      const token = localStorage.getItem('access_token')
-      await axios.post('http://localhost:8000/api/documents/', formData, {
-        headers: { Authorization: `Bearer ${token}` }
+      await api.post('/api/documents/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       })
       fetchDocuments()
       setSelectedFile(null)
@@ -265,11 +258,7 @@ export default function Dashboard({ onLogout }) {
     if (!query.trim()) return
     setLoading(true)
     try {
-      const token = localStorage.getItem('access_token')
-      const res = await axios.post('http://localhost:8000/api/query/',
-        { query },
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
+      const res = await api.post('/api/query/', { query })
       const newEntry = { question: query, timestamp: new Date().toISOString(), ...res.data }
       const updated = [newEntry, ...chatHistory]
       setChatHistory(updated)

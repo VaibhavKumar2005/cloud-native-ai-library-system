@@ -8,13 +8,9 @@ name: VeriRAG CI/CD Pipeline
 on:
   push:
     branches: [main, develop]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'infrastructure/**'
-      - '.github/workflows/**'
   pull_request:
     branches: [main]
+  workflow_dispatch:  # Allow manual triggers
 
 env:
   DOCKER_REGISTRY: docker.io

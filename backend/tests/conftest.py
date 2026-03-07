@@ -57,7 +57,7 @@ def sample_document(user, tmp_path):
     dummy_pdf.write_bytes(b"%PDF-1.4 dummy content for testing")
     doc = Document.objects.create(
         title="Test Research Paper",
-        file=str(dummy_pdf),
+        file=dummy_pdf.name,
         user=user,
         processed=False,
     )

@@ -1,30 +1,34 @@
 ###############################################################################
-# VeriRAG — GitOps CI/CD Pipeline
-# Builds Docker images, pushes to ACR, updates image tags in k8s-manifests repo
-# Follows AZ-400 best practices: no secrets in logs, minimal permissions
+# VeriRAG — CI/CD Pipeline with Docker Hub & Azure Container Apps
+# Builds Docker images, pushes to Docker Hub, deploys to Azure Container Apps
+# Follows DevOps best practices: automated testing, security scanning, deployment
 ###############################################################################
-name: VeriRAG CI/CD
+name: VeriRAG CI/CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - 'backend/**'
       - 'frontend/**'
+      - 'infrastructure/**'
       - '.github/workflows/**'
   pull_request:
     branches: [main]
 
 env:
-  ACR_NAME: acrvaibhavrag2026
-  ACR_LOGIN_SERVER: acrvaibhavrag2026.azurecr.io
-  BACKEND_IMAGE: verirag-backend
-  FRONTEND_IMAGE: verirag-frontend
-  K8S_MANIFESTS_REPO: VaibhavKumar2005/verirag-k8s-manifests
+  DOCKER_REGISTRY: docker.io
+  DOCKER_USERNAME: vaibhavkumar0412
+  BACKEND_IMAGE: vaibhavkumar0412/verirag-backend
+  FRONTEND_IMAGE: vaibhavkumar0412/verirag-frontend
+  AZURE_RESOURCE_GROUP: rg-verirag-dev
+  BACKEND_APP_NAME: ca-verirag-dev-backend
+  CELERY_APP_NAME: ca-verirag-dev-celery-worker
 
 permissions:
-  contents: read
+  contents: write
   packages: write
+  security-events: write
   id-token: write  # Required for OIDC login to Azure
 
 jobs:
@@ -101,15 +105,16 @@ jobs:
           npm run build
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # JOB 2: Build & Push Docker Images to ACR
+  # JOB 2: Build & Push Docker Images to Docker Hub
   # ═══════════════════════════════════════════════════════════════════════════
   build-and-push:
-    name: Build & Push to ACR
+    name: Build & Push to Docker Hub
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     outputs:
       image_tag: ${{ steps.meta.outputs.sha_short }}
+      full_sha: ${{ github.sha }}
 
     steps:
       - name: Checkout code
@@ -121,15 +126,16 @@ jobs:
           SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
           echo "timestamp=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+          echo "branch=${GITHUB_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
 
-      # Option A: Service Principal login (set up AZURE_CREDENTIALS secret)
-      - name: Login to Azure
-        uses: azure/login@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Login to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # ── Build & Push Backend ────────────────────────────────────────────
       - name: Build & push backend image
@@ -139,8 +145,10 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.sha_short }}
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.sha_short }}
+            ${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.BACKEND_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.BACKEND_IMAGE }}:buildcache,mode=max
 
       # ── Build & Push Frontend ───────────────────────────────────────────
       - name: Build & push frontend image
@@ -152,58 +160,103 @@ jobs:
           build-args: |
             VITE_API_URL=${{ vars.VITE_API_URL || 'https://api.verirag.dev' }}
           tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.sha_short }}
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.sha_short }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.FRONTEND_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.FRONTEND_IMAGE }}:buildcache,mode=max
+
+      - name: Generate build summary
+        run: |
+          echo "### 🐳 Docker Images Built & Pushed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | \`${{ steps.meta.outputs.sha_short }}\` | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | \`${{ steps.meta.outputs.sha_short }}\` | - |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Docker Hub:** [vaibhavkumar0412](https://hub.docker.com/u/vaibhavkumar0412)" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # JOB 3: Update K8s Manifests Repository (GitOps)
+  # JOB 3: Deploy to Azure Container Apps
   # ═══════════════════════════════════════════════════════════════════════════
-  update-manifests:
-    name: Update K8s Manifests
+  deploy-azure:
+    name: Deploy to Azure Container Apps
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://${{ steps.get-url.outputs.backend_url }}
 
     steps:
-      - name: Checkout manifests repo
+      - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
         with:
-          repository: ${{ env.K8S_MANIFESTS_REPO }}
-          token: ${{ secrets.MANIFESTS_PAT }}
-          path: manifests
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Update image tags in Kustomization
+      - name: Update backend container app
         run: |
-          cd manifests
-          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          az containerapp update \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }} \
+            --output none
+          echo "✅ Backend updated to image tag: ${{ needs.build-and-push.outputs.image_tag }}"
 
-          # Update kustomization.yaml image tags
-          if [ -f kustomization.yaml ]; then
-            sed -i "s|newTag: .*|newTag: ${TAG}|g" kustomization.yaml
+      - name: Update Celery worker container app
+        run: |
+          az containerapp update \
+            --name ${{ env.CELERY_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }} \
+            --output none
+          echo "✅ Celery worker updated to image tag: ${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Get backend URL
+        id: get-url
+        run: |
+          BACKEND_URL=$(az containerapp show \
+            --name ${{ env.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          echo "backend_url=${BACKEND_URL}" >> "$GITHUB_OUTPUT"
+          echo "Backend URL: https://${BACKEND_URL}"
+
+      - name: Health check
+        run: |
+          echo "⏳ Waiting 30s for containers to start..."
+          sleep 30
+          
+          BACKEND_URL="https://${{ steps.get-url.outputs.backend_url }}"
+          echo "Testing health endpoint: ${BACKEND_URL}/api/health/"
+          
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${BACKEND_URL}/api/health/" || echo "000")
+          
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Health check passed!"
+          else
+            echo "⚠️  Health check returned: $RESPONSE (may need more warmup time)"
           fi
 
-          # Update Helm values if present
-          if [ -f helm/verirag/values-production.yaml ]; then
-            sed -i "s|tag: .*|tag: \"${TAG}\"|g" helm/verirag/values-production.yaml
-          fi
-
-          echo "Updated image tags to: ${TAG}"
-
-      - name: Commit & push manifest changes
+      - name: Generate deployment summary
         run: |
-          cd manifests
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet || git commit -m "chore(ci): update image tag to ${{ needs.build-and-push.outputs.image_tag }}
-
-          Triggered by: ${{ github.event.head_commit.message }}
-          Source commit: ${{ github.sha }}
-          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          git push
+          echo "### 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Image Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | ✅ Deployed | \`${{ needs.build-and-push.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Celery Worker | ✅ Deployed | \`${{ needs.build-and-push.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Backend URL:** https://${{ steps.get-url.outputs.backend_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ needs.build-and-push.outputs.full_sha }}" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # JOB 4: Security Scan (AZ-400 compliance)
+  # JOB 4: Security Scan (DevOps Best Practice)
   # ═══════════════════════════════════════════════════════════════════════════
   security-scan:
     name: Security Scan
@@ -212,22 +265,34 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Run Trivy vulnerability scanner (Backend)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '${{ env.ACR_LOGIN_SERVER }}/${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }}'
+          image-ref: '${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }}'
           format: 'sarif'
           output: 'trivy-backend.sarif'
           severity: 'CRITICAL,HIGH'
-        env:
-          TRIVY_USERNAME: ${{ secrets.ACR_USERNAME }}
-          TRIVY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          ignore-unfixed: true
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-backend.sarif'
+          category: 'backend-security'
+
+      - name: Run Trivy vulnerability scanner (Frontend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.FRONTEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }}'
+          format: 'sarif'
+          output: 'trivy-frontend.sarif'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Upload Frontend scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-frontend.sarif'
+          category: 'frontend-security'

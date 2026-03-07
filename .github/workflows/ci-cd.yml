@@ -76,7 +76,7 @@ jobs:
           cd backend
           pip install -r requirements.txt
 
-      - name: Run Django tests
+      - name: Run Django checks and tests
         env:
           DJANGO_SETTINGS_MODULE: rag_backend.settings
           DJANGO_SECRET_KEY: ci-test-key-not-for-production
@@ -89,8 +89,9 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: |
           cd backend
+          python manage.py check --deploy 2>&1 || true
           python manage.py migrate --no-input
-          python -m pytest tests/ -v --tb=short
+          python manage.py test ai_engine.tests librarian.tests verifier.tests --verbosity=2 --no-input
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4

@@ -281,7 +281,54 @@ For GitOps workflows, point Argo CD or Flux to the `k8s/` directory.
 
 ---
 
-## 📊 Observability
+## � CI/CD Pipeline
+
+VeriRAG uses **GitHub Actions** for automated testing, building, and deployment:
+
+### Pipeline Stages
+
+```mermaid
+graph LR
+    A[Push to Main] --> B[Test Stage]
+    B --> C[Build & Push to Docker Hub]
+    C --> D[Deploy to Azure Container Apps]
+    C --> E[Security Scan with Trivy]
+    D --> F[Health Check]
+```
+
+### Features
+
+- **Automated Testing**: Runs Django tests and frontend build validation on every PR
+- **Docker Image Building**: Creates optimized images with build caching
+- **Docker Hub Publishing**: Tags images with git SHA and `latest`
+- **Azure Deployment**: Auto-deploys to Container Apps with KEDA scale-to-zero
+- **Security Scanning**: Trivy scans for vulnerabilities, reports to GitHub Security
+- **Health Verification**: Validates deployment with `/api/health/` endpoint
+
+### Quick Start
+
+1. **Add GitHub Secrets** (see [.github/GITHUB_ACTIONS_SETUP.md](.github/GITHUB_ACTIONS_SETUP.md)):
+   - `DOCKERHUB_TOKEN`: Docker Hub Personal Access Token
+   - `AZURE_CREDENTIALS`: Azure Service Principal JSON
+
+2. **Make a commit and push**:
+   ```bash
+   git add .
+   git commit -m "feat: add new feature with proper commit message"
+   git push origin main
+   ```
+
+3. **Monitor pipeline** at `https://github.com/VaibhavKumar2005/cloud-native-ai-library-system/actions`
+
+4. **View deployment** after 5-10 minutes at your Azure Container Apps URL
+
+For detailed setup instructions and best practices, see:
+- [GitHub Actions Setup Guide](.github/GITHUB_ACTIONS_SETUP.md)
+- [Git Workflow Best Practices](.github/GIT_WORKFLOW.md)
+
+---
+
+## �📊 Observability
 
 - **Prometheus** scrapes custom metrics at `/metrics`:
   - `verirag_hallucination_rejections_total` — blocked hallucinations

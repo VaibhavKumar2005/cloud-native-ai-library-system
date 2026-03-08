@@ -21,6 +21,36 @@ $ErrorActionPreference = "Continue"
 $BASE_URL = "http://localhost:8000/api"
 $TEST_PDF = "test-document.pdf"
 
+function New-MinimalTestPdf {
+    param([string]$Path)
+
+    # Self-contained minimal PDF so tests do not depend on reportlab.
+    $pdfContent = @"
+%PDF-1.4
+1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
+2 0 obj<< /Type /Pages /Count 1 /Kids [3 0 R] >>endobj
+3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj
+4 0 obj<< /Length 61 >>stream
+BT /F1 18 Tf 40 80 Td (VeriRAG test pdf content for embeddings) Tj ET
+endstream endobj
+5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000352 00000 n 
+trailer<< /Root 1 0 R /Size 6 >>
+startxref
+422
+%%EOF
+"@
+
+    [System.IO.File]::WriteAllText($Path, $pdfContent, [System.Text.Encoding]::ASCII)
+}
+
 Write-Host "`n🧪 VeriRAG PDF Pipeline Test Suite" -ForegroundColor Cyan
 Write-Host "====================================`n" -ForegroundColor Cyan
 
@@ -96,22 +126,7 @@ try {
 Write-Host "`n[4/8] Creating Test PDF..." -ForegroundColor Yellow
 
 if (-not (Test-Path $TEST_PDF)) {
-    # Create a simple PDF using Python
-    $createPdfScript = @"
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-
-c = canvas.Canvas('$TEST_PDF', pagesize=letter)
-c.drawString(100, 750, 'VeriRAG Test Document')
-c.drawString(100, 700, 'This is a test PDF for the RAG pipeline.')
-c.drawString(100, 680, 'Cloud computing enables scalable AI applications.')
-c.drawString(100, 660, 'Vector embeddings power semantic search.')
-c.save()
-print('PDF created')
-"@
-
-    docker exec rag-backend python -c $createPdfScript
-    docker cp rag-backend:/app/$TEST_PDF ./$TEST_PDF
+    New-MinimalTestPdf -Path $TEST_PDF
     Write-Host "  ✅ Test PDF created: $TEST_PDF" -ForegroundColor Green
 } else {
     Write-Host "  ✅ Using existing test PDF: $TEST_PDF" -ForegroundColor Green
@@ -171,7 +186,7 @@ print(f'Document created with ID: {doc.id}')
     Write-Host "  $result" -ForegroundColor Green
     
     # Extract document ID
-    if ($result -match 'ID: (\d+)') {
+    if ($result -match '(?i)ID:\s*(\d+)') {
         $documentId = $Matches[1]
     }
 }
@@ -180,9 +195,9 @@ print(f'Document created with ID: {doc.id}')
 # TEST 6: CHECK CELERY WORKER LOGS
 # ══════════════════════════════════════════════════════════════════
 Write-Host "`n[6/8] Checking Celery Worker Processing..." -ForegroundColor Yellow
-Write-Host "  ⏳ Waiting 5 seconds for Celery to process..." -ForegroundColor Gray
+Write-Host "  ⏳ Waiting 20 seconds for Celery to process..." -ForegroundColor Gray
 
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 20
 
 $celeryLogs = docker logs rag-celery-worker --tail 30 2>&1
 $hasError = $celeryLogs | Select-String -Pattern "ERROR|Traceback|Failed"

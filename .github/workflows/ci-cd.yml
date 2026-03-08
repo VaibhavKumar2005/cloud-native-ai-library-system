@@ -13,10 +13,9 @@ on:
   workflow_dispatch:  # Allow manual triggers
 
 env:
-  DOCKER_REGISTRY: docker.io
-  DOCKER_USERNAME: vaibhavkumar0412
-  BACKEND_IMAGE: vaibhavkumar0412/verirag-backend
-  FRONTEND_IMAGE: vaibhavkumar0412/verirag-frontend
+  DOCKER_REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  BACKEND_IMAGE: ${{ secrets.ACR_LOGIN_SERVER }}/verirag-backend
+  FRONTEND_IMAGE: ${{ secrets.ACR_LOGIN_SERVER }}/verirag-frontend
   AZURE_RESOURCE_GROUP: rg-verirag-dev
   BACKEND_APP_NAME: ca-verirag-dev-backend
   CELERY_APP_NAME: ca-verirag-dev-celery-worker
@@ -130,11 +129,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to Azure Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       # ── Build & Push Backend ────────────────────────────────────────────
       - name: Build & push backend image
@@ -173,17 +173,19 @@ jobs:
           echo "| Backend | \`${{ steps.meta.outputs.sha_short }}\` | - |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend | \`${{ steps.meta.outputs.sha_short }}\` | - |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Docker Hub:** [vaibhavkumar0412](https://hub.docker.com/u/vaibhavkumar0412)" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** ${{ env.DOCKER_REGISTRY }}" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # JOB 3: Deploy to Azure Container Apps
+  # JOB 3: Deploy to Azure Container Apps (MANUAL TRIGGER ONLY - Cost Control)
   # ═══════════════════════════════════════════════════════════════════════════
   deploy-azure:
     name: Deploy to Azure Container Apps
     needs: build-and-push
     runs-on: ubuntu-latest
     continue-on-error: true
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # COST CONTROL: Only deploy on workflow_dispatch (manual trigger) 
+    # This prevents auto-deploys on every commit, saving Azure credits
+    if: github.event_name == 'workflow_dispatch'
     environment:
       name: production
       url: https://${{ steps.get-url.outputs.backend_url }}
@@ -266,6 +268,13 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      - name: Login to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
       - name: Run Trivy vulnerability scanner (Backend)
         uses: aquasecurity/trivy-action@master
         with:

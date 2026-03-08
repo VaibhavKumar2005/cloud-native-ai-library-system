@@ -1,9 +1,12 @@
 # Core Frameworks
-Django==5.0.2
+# Security: Upgraded to patched versions (CVE-2024-* and CVE-2025-* fixes)
+Django>=5.1.7  # Was 5.0.2 - Multiple SQL injection and DoS vulnerabilities fixed
 djangorestframework==3.14.0
 python-dotenv==1.0.1
 django-cors-headers==4.3.1
-gunicorn==21.2.0
+gunicorn>=23.0.0  # Was 21.2.0 - HTTP Request Smuggling vulnerabilities fixed (CVE-2024-1135)
+wheel>=0.46.0  # Malicious wheel unpacking CVE-2024-38335 fixed
+jaraco.context>=6.0.0  # Path traversal via malicious tar archives CVE-2024-6345 fixed
 
 # AI & LLM (Google Gemini + LangChain + Fallback)
 google-genai>=0.1.0

@@ -195,6 +195,7 @@ export default function Dashboard({ onLogout }) {
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
+  const [uploadError, setUploadError] = useState('')
   const [chatHistory, setChatHistory] = useState(() => {
     const saved = localStorage.getItem('verirag_query_history')
     return saved ? JSON.parse(saved) : []
@@ -239,17 +240,25 @@ export default function Dashboard({ onLogout }) {
   // ── Handlers ────────────────────────────────────────────────────────
   const handleFileUpload = async () => {
     if (!selectedFile) return
+    if ((selectedFile.type && selectedFile.type !== 'application/pdf') || !selectedFile.name.toLowerCase().endsWith('.pdf')) {
+      setUploadError('Only PDF files are supported.')
+      return
+    }
     setUploading(true)
+    setUploadError('')
     const formData = new FormData()
     formData.append('file', selectedFile)
     formData.append('title', selectedFile.name)
     try {
-      await api.post('/api/documents/', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
+      // Let the browser set multipart boundaries automatically.
+      await api.post('/api/documents/', formData)
       fetchDocuments()
       setSelectedFile(null)
-    } catch (err) { console.error("Upload failed", err) }
+    } catch (err) {
+      console.error("Upload failed", err)
+      const serverDetail = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      setUploadError(serverDetail || 'Upload failed. Please re-login and try again.')
+    }
     setUploading(false)
   }
 
@@ -483,6 +492,11 @@ export default function Dashboard({ onLogout }) {
                   </DialogHeader>
                   <div className="py-4 flex flex-col gap-4">
                     <Input type="file" accept=".pdf" onChange={(e) => setSelectedFile(e.target.files[0])} className="bg-white/5 border-white/10 rounded-xl" />
+                    {uploadError && (
+                      <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                        {uploadError}
+                      </p>
+                    )}
                     {selectedFile && (
                       <Button onClick={handleFileUpload} disabled={uploading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl">
                         {uploading ? "Indexing..." : "Upload to Library"}

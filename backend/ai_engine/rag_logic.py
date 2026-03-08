@@ -226,8 +226,9 @@ def ingest_document(doc_id):
     """
     import time as _time
 
-    BATCH_SIZE = 80  # chunks per batch (stay under 100 RPM limit)
-    BATCH_DELAY = 62  # seconds between batches
+    # Demo-friendly defaults: faster indexing while still allowing runtime tuning.
+    BATCH_SIZE = int(os.environ.get("EMBEDDING_BATCH_SIZE", "32"))
+    BATCH_DELAY = float(os.environ.get("EMBEDDING_BATCH_DELAY_SECONDS", "1.5"))
 
     try:
         doc = Document.objects.get(id=doc_id)
@@ -289,14 +290,14 @@ def ingest_document(doc_id):
                     break  # Success
                 except Exception as e:
                     if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
-                        wait_time = BATCH_DELAY * (attempt + 1)
+                        wait_time = max(BATCH_DELAY, 1.0) * (attempt + 1)
                         logger.warning(f"⏳ Rate limited, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
                         _time.sleep(wait_time)
                     else:
                         raise  # Non-rate-limit error, propagate
             
             # Pause between batches (skip after last batch)
-            if batch_idx < total_batches - 1:
+            if batch_idx < total_batches - 1 and BATCH_DELAY > 0:
                 logger.info(f"⏳ Rate limit pause ({BATCH_DELAY}s) before next batch...")
                 _time.sleep(BATCH_DELAY)
 

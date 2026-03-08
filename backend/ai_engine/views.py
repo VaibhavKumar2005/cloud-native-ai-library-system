@@ -17,7 +17,14 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from prometheus_client import REGISTRY
 from ai_engine.models import Document
-from ai_engine.rag_logic import get_verified_answer, ingest_document
+from ai_engine.rag_logic import get_verified_answer
+# Try to import the Celery task to avoid synchronous blocking
+try:
+    from ai_engine.tasks import on_document_uploaded
+    HAS_CELERY_TASK = True
+except ImportError:
+    from ai_engine.rag_logic import ingest_document
+    HAS_CELERY_TASK = False
 from .serializers import DocumentSerializer
 
 logger = logging.getLogger(__name__)
@@ -77,19 +84,31 @@ class DocumentViewSet(viewsets.ModelViewSet):
         document = serializer.save(user=self.request.user)
         
         # Trigger automatic ingestion after upload
-        try:
-            result = ingest_document(document.id)
-            if result.get('status') == 'success':
-                logger.info(f"✅ Auto-ingested document {document.id}")
-            else:
-                logger.warning(f"⚠️ Auto-ingestion failed for {document.id}: {result.get('message')}")
-        except Exception as e:
-            logger.error(f"❌ Auto-ingestion error for {document.id}: {e}")
+        if HAS_CELERY_TASK:
+            # Async: Queue the task and return immediately (prevents timeouts)
+            on_document_uploaded.delay(document.id)
+            logger.info(f"⏳ Queued document {document.id} for background ingestion")
+        else:
+            # Fallback: Synchronous (blocking)
+            try:
+                result = ingest_document(document.id)
+                if result.get('status') == 'success':
+                    logger.info(f"✅ Auto-ingested document {document.id}")
+                else:
+                    logger.warning(f"⚠️ Auto-ingestion failed for {document.id}: {result.get('message')}")
+            except Exception as e:
+                logger.error(f"❌ Auto-ingestion error for {document.id}: {e}")
 
     @action(detail=True, methods=['post'])
     def reprocess(self, request, pk=None):
         """Manually trigger reprocessing of a document."""
         document = self.get_object()
+        if HAS_CELERY_TASK:
+            on_document_uploaded.delay(document.id)
+            return Response({"status": "queued", "message": "Document queued for reprocessing"})
+        
+        # Fallback for dev/testing without workers
+        from ai_engine.rag_logic import ingest_document
         result = ingest_document(document.id)
         return Response(result)
 
@@ -258,15 +277,21 @@ def process_document(request):
             status=status.HTTP_404_NOT_FOUND
         )
     
-    result = ingest_document(doc_id)
-    
-    return Response({
-        "document_id": doc_id,
-        "title": doc.title,
-        "status": result.get("status"),
-        "message": result.get("message"),
-        "chunks_created": result.get("chunks_created", 0)
-    })
+    if HAS_CELERY_TASK:
+        on_document_uploaded.delay(doc_id)
+        return Response({
+            "document_id": doc_id,
+            "status": "queued",
+            "message": "Processing started in background"
+        })
+    else:
+        from ai_engine.rag_logic import ingest_document
+        result = ingest_document(doc_id)
+        return Response({
+            "document_id": doc_id,
+            "status": result.get("status"),
+            "message": result.get("message")
+        })
 
 
 # ============================================================================

@@ -12,7 +12,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /build
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Security: Upgrade all OS packages to latest patched versions, then install build deps
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -33,8 +34,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=rag_backend.settings
 
-# Install only the runtime library (no compiler)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Security: Upgrade all OS packages to latest patched versions, then install runtime deps
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     && rm -rf /var/lib/apt/lists/*

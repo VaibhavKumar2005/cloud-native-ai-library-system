@@ -67,10 +67,11 @@ services:
   rag-backend:
     build: ./backend
     container_name: rag-backend
+    user: "0:0"
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - ./backend:/app
-      - ./backend/media:/app/media
+      - media_data:/app/media
     ports:
       - "8000:8000"
     env_file:
@@ -103,10 +104,11 @@ services:
   rag-celery-worker:
     build: ./backend
     container_name: rag-celery-worker
+    user: "0:0"
     command: celery -A rag_backend worker -l info -Q celery,ingestion,monitoring,maintenance
     volumes:
       - ./backend:/app
-      - ./backend/media:/app/media
+      - media_data:/app/media
     env_file:
       - .env
     environment:
@@ -203,6 +205,7 @@ volumes:
   grafana_data:
   redis_data:
   celerybeat_schedule:
+  media_data:
 
 networks:
   rag-network:

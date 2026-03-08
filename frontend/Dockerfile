@@ -6,6 +6,9 @@
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
+# Security: Upgrade all OS packages to latest patched versions
+RUN apk update && apk upgrade --no-cache
+
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -19,7 +22,10 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
 # ── Stage 2: Serve ──────────────────────────────────────────────────────────
-FROM nginx:1.25-alpine AS runtime
+FROM nginx:stable-alpine AS runtime
+
+# Security: Upgrade all OS packages to latest patched versions
+RUN apk update && apk upgrade --no-cache
 
 LABEL maintainer="Team96 <team96@verirag.dev>" \
       org.opencontainers.image.title="VeriRAG Frontend" \

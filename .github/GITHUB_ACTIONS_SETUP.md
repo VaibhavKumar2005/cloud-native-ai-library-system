@@ -1,20 +1,20 @@
 # GitHub Actions CI/CD Setup Guide
 
-This guide explains how to set up automated CI/CD for VeriRAG using GitHub Actions, Docker Hub, and Azure Container Apps.
+This guide explains how to set up automated CI/CD for VeriRAG using GitHub Actions, Azure Container Registry (ACR), and Azure Container Apps.
 
 ## 🎯 Pipeline Overview
 
 The CI/CD pipeline automatically:
 1. **Tests** - Runs Django tests and frontend build validation
 2. **Builds** - Creates optimized Docker images
-3. **Pushes** - Publishes to Docker Hub with versioned tags
+3. **Pushes** - Publishes to Azure Container Registry with versioned tags
 4. **Deploys** - Updates Azure Container Apps with new images
 5. **Scans** - Performs security vulnerability scanning
 
 ## 📋 Prerequisites
 
 Before the pipeline can run, you need:
-- ✅ Docker Hub account (vaibhavkumar0412)
+ ✅ Azure Container Registry (ACR) deployed
 - ✅ Azure subscription with Container Apps deployed
 - ✅ Azure Service Principal with Container Apps permissions
 
@@ -22,22 +22,29 @@ Before the pipeline can run, you need:
 
 Go to your repository: **Settings → Secrets and variables → Actions → New repository secret**
 
-### 1. DOCKERHUB_TOKEN
+### 1. ACR Secrets (Registry Access)
 
-**What**: Docker Hub Personal Access Token for pushing images
+**What**: Credentials to push images to your private Azure Container Registry.
 
 **How to get**:
-```bash
-# Go to Docker Hub: https://hub.docker.com/settings/security
-# Click "New Access Token"
-# Name: "GitHub Actions VeriRAG"
-# Permissions: Read & Write
-# Copy the generated token
+```powershell
+# Get ACR Login Server
+az acr show --name <your-acr-name> --resource-group rg-verirag-dev --query loginServer --output tsv
+
+# Enable Admin User (if not enabled)
+az acr update --name <your-acr-name> --admin-enabled true
+
+# Get Username & Password
+az acr credential show --name <your-acr-name>
 ```
 
 **Add to GitHub**:
-- Name: `DOCKERHUB_TOKEN`
-- Value: `<paste-token-here>`
+- Name: `ACR_LOGIN_SERVER`
+- Value: (e.g., `veriragregistry.azurecr.io`)
+- Name: `ACR_USERNAME`
+- Value: (from `az acr credential show`)
+- Name: `ACR_PASSWORD`
+- Value: (from `az acr credential show`)
 
 ### 2. AZURE_CREDENTIALS
 
@@ -122,11 +129,11 @@ gh pr create --base main --head feature-branch
 #### 2. Build & Push Stage
 - Generates git short SHA as image tag (e.g., `a1b2c3d`)
 - Builds Docker images with build cache optimization
-- Pushes to Docker Hub:
-  - `vaibhavkumar0412/verirag-backend:a1b2c3d`
-  - `vaibhavkumar0412/verirag-backend:latest`
-  - `vaibhavkumar0412/verirag-frontend:a1b2c3d`
-  - `vaibhavkumar0412/verirag-frontend:latest`
+- Pushes to Azure Container Registry:
+  - `<acr-name>.azurecr.io/verirag-backend:a1b2c3d`
+  - `<acr-name>.azurecr.io/verirag-backend:latest`
+  - `<acr-name>.azurecr.io/verirag-frontend:a1b2c3d`
+  - `<acr-name>.azurecr.io/verirag-frontend:latest`
 
 #### 3. Deploy Stage (Main branch only)
 - Logs into Azure using Service Principal
@@ -244,7 +251,7 @@ git commit -m "fix stuff"
 ### Pipeline Fails on Docker Push
 **Error**: `denied: requested access to the resource is denied`
 
-**Fix**: Check that `DOCKERHUB_TOKEN` secret is set correctly
+**Fix**: Check that `ACR_USERNAME` and `ACR_PASSWORD` secrets are set correctly in GitHub.
 
 ### Azure Deployment Fails
 **Error**: `az: command not found` or authentication error
@@ -270,13 +277,15 @@ git commit -m "fix stuff"
 ## 📚 Additional Resources
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Docker Hub Documentation](https://docs.docker.com/docker-hub/)
+- [Azure Container Registry Documentation](https://learn.microsoft.com/en-us/azure/container-registry/)
 - [Azure Container Apps CI/CD](https://learn.microsoft.com/en-us/azure/container-apps/github-actions)
 - [Conventional Commits](https://www.conventionalcommits.org/)
 
 ## 🎯 Quick Start Checklist
 
-- [ ] Add `DOCKERHUB_TOKEN` to GitHub Secrets
+- [ ] Add `ACR_LOGIN_SERVER` to GitHub Secrets
+- [ ] Add `ACR_USERNAME` to GitHub Secrets
+- [ ] Add `ACR_PASSWORD` to GitHub Secrets
 - [ ] Add `AZURE_CREDENTIALS` to GitHub Secrets
 - [ ] Deploy infrastructure using `infrastructure/deploy.ps1`
 - [ ] Add API keys using `infrastructure/add-api-keys.ps1`

@@ -19,6 +19,7 @@ env:
   AZURE_RESOURCE_GROUP: rg-verirag-dev
   BACKEND_APP_NAME: ca-verirag-dev-backend
   CELERY_APP_NAME: ca-verirag-dev-celery-worker
+  FRONTEND_APP_NAME: ca-verirag-dev-frontend
 
 permissions:
   contents: write
@@ -157,7 +158,7 @@ jobs:
           file: ./frontend/Dockerfile
           push: true
           build-args: |
-            VITE_API_URL=${{ vars.VITE_API_URL || 'https://api.verirag.dev' }}
+            VITE_API_URL=${{ vars.VITE_API_URL }}
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.sha_short }}
             ${{ env.FRONTEND_IMAGE }}:latest
@@ -217,6 +218,15 @@ jobs:
             --output none
           echo "✅ Celery worker updated to image tag: ${{ needs.build-and-push.outputs.image_tag }}"
 
+      - name: Update frontend container app
+        run: |
+          az containerapp update \
+            --name ${{ env.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.FRONTEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }} \
+            --output none
+          echo "✅ Frontend updated to image tag: ${{ needs.build-and-push.outputs.image_tag }}"
+
       - name: Get backend URL
         id: get-url
         run: |
@@ -252,6 +262,7 @@ jobs:
           echo "|-----------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
           echo "| Backend | ✅ Deployed | \`${{ needs.build-and-push.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Celery Worker | ✅ Deployed | \`${{ needs.build-and-push.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | ✅ Deployed | \`${{ needs.build-and-push.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Backend URL:** https://${{ steps.get-url.outputs.backend_url }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

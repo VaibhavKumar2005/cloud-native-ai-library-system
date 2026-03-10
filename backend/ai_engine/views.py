@@ -78,6 +78,42 @@ def query_llm(request):
     result = get_verified_answer(user_query, user_id=request.user.id)
     return Response(result)
 
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def process_document(request):
+    """Queue asynchronous processing for an existing uploaded document."""
+    doc_id = request.data.get('document_id')
+    if not doc_id:
+        return Response({"error": "document_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        document = Document.objects.get(id=doc_id, user=request.user)
+    except Document.DoesNotExist:
+        return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    ingest_document_task.delay(document.id)
+    return Response({"status": "queued", "document_id": document.id}, status=status.HTTP_202_ACCEPTED)
+
+
+class SystemInsightsView(APIView):
+    """Expose lightweight telemetry used by the frontend monitoring dashboard."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        metrics = []
+        for metric in REGISTRY.collect():
+            metrics.append(
+                {
+                    "name": metric.name,
+                    "samples": [
+                        {"name": s.name, "labels": s.labels, "value": s.value}
+                        for s in metric.samples
+                    ],
+                }
+            )
+        return Response({"metrics": metrics})
+
 # ============================================================================
 # 3. PUBLIC HEALTH CHECK (for K8s & Infrastructure)
 # ============================================================================
@@ -91,20 +127,45 @@ def health_check(request):
 
     # PostgreSQL Check
     try:
+        start = time.perf_counter()
         connections['default'].cursor().execute("SELECT 1")
-        checks['db'] = 'healthy'
+        checks['postgresql'] = {
+            'status': 'healthy',
+            'latency_ms': round((time.perf_counter() - start) * 1000, 2),
+        }
     except Exception:
         overall_healthy = False
-        checks['db'] = 'unhealthy'
+        checks['postgresql'] = {'status': 'unhealthy', 'latency_ms': 0}
 
     # Redis Check
     try:
+        start = time.perf_counter()
         r = redis.from_url(os.environ.get('REDIS_URL', 'redis://rag-redis:6379/0'))
         r.ping()
-        checks['redis'] = 'healthy'
+        checks['redis'] = {
+            'status': 'healthy',
+            'latency_ms': round((time.perf_counter() - start) * 1000, 2),
+        }
     except Exception:
         overall_healthy = False
-        checks['redis'] = 'unhealthy'
+        checks['redis'] = {'status': 'unhealthy', 'latency_ms': 0}
+
+    # Vault Check
+    try:
+        start = time.perf_counter()
+        client = hvac.Client(
+            url=os.environ.get('VAULT_ADDR', 'http://rag-vault:8200'),
+            token=os.environ.get('VAULT_TOKEN')
+        )
+        sealed = client.sys.read_seal_status().get('sealed', True)
+        if sealed:
+            overall_healthy = False
+            checks['vault'] = {'status': 'unhealthy', 'latency_ms': round((time.perf_counter() - start) * 1000, 2)}
+        else:
+            checks['vault'] = {'status': 'healthy', 'latency_ms': round((time.perf_counter() - start) * 1000, 2)}
+    except Exception:
+        overall_healthy = False
+        checks['vault'] = {'status': 'unhealthy', 'latency_ms': 0}
 
     return Response({'healthy': overall_healthy, 'services': checks}, 
                     status=status.HTTP_200_OK if overall_healthy else status.HTTP_503_SERVICE_UNAVAILABLE)

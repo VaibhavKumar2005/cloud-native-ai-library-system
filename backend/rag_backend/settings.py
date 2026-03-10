@@ -191,20 +191,30 @@ WSGI_APPLICATION = 'rag_backend.wsgi.application'
 # --- 3. DATABASE (PostgreSQL / PGVector) ---
 # In cloud mode, credentials come from ACA secrets / Key Vault.
 # In local mode, credentials come from .env via docker-compose.
-_pg_password = os.environ.get('POSTGRES_PASSWORD') or get_secret('POSTGRES_PASSWORD')
-if not _pg_password and not DEBUG:
-    raise ValueError("POSTGRES_PASSWORD must be set via env var or vault in production.")
+USE_SQLITE_FOR_TESTS = os.environ.get('USE_SQLITE_FOR_TESTS', '0') == '1'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('POSTGRES_DB', 'verirag_db'),
-        'USER': os.environ.get('POSTGRES_USER', 'admin'),
-        'PASSWORD': _pg_password or 'devpassword',  # fallback only when DEBUG=True
-        'HOST': os.environ.get('POSTGRES_HOST', 'rag-db'),
-        'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+if USE_SQLITE_FOR_TESTS:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'test_db.sqlite3',
+        }
     }
-}
+else:
+    _pg_password = os.environ.get('POSTGRES_PASSWORD') or get_secret('POSTGRES_PASSWORD')
+    if not _pg_password and not DEBUG:
+        raise ValueError("POSTGRES_PASSWORD must be set via env var or vault in production.")
+
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_DB', 'verirag_db'),
+            'USER': os.environ.get('POSTGRES_USER', 'admin'),
+            'PASSWORD': _pg_password or 'devpassword',  # fallback only when DEBUG=True
+            'HOST': os.environ.get('POSTGRES_HOST', 'rag-db'),
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+        }
+    }
 
 # --- 4. API & AUTHENTICATION (JWT) ---
 from datetime import timedelta

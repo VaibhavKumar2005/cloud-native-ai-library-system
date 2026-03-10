@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 
 # ── Django Setup ─────────────────────────────────────────────────────────
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rag_backend.settings")
+os.environ.setdefault("USE_SQLITE_FOR_TESTS", "1")
 
 import django
 django.setup()
@@ -88,7 +89,8 @@ def mock_vault():
     Mock HashiCorp Vault client to avoid real Vault dependency in tests.
     Returns the mock client for assertions.
     """
-    with patch("ai_engine.rag_logic.hvac.Client") as MockClient:
+    with patch.dict("os.environ", {"VAULT_TOKEN": "test-vault-token"}, clear=False), \
+         patch("ai_engine.rag_logic.hvac.Client") as MockClient:
         instance = MockClient.return_value
         instance.is_authenticated.return_value = True
         instance.sys.is_initialized.return_value = True
@@ -130,21 +132,20 @@ def mock_vault_unreachable():
 @pytest.fixture
 def mock_gemini():
     """Mock Google Gemini API responses."""
-    with patch("ai_engine.rag_logic.genai") as mock_genai:
-        mock_model = MagicMock()
+    with patch("ai_engine.rag_logic.genai.Client") as MockClient:
+        mock_client = MockClient.return_value
         mock_response = MagicMock()
         mock_response.text = '{"answer": "Test answer from Gemini", "faithfulness_score": 0.85, "explanation": "Found in context", "source_citation": "Page 3"}'
-        mock_model.generate_content.return_value = mock_response
-        mock_genai.GenerativeModel.return_value = mock_model
-        yield mock_genai
+        mock_client.models.generate_content.return_value = mock_response
+        yield mock_client
 
 
 @pytest.fixture
 def mock_gemini_failing():
     """Mock a failing Gemini API."""
-    with patch("ai_engine.rag_logic.genai") as mock_genai:
-        mock_genai.GenerativeModel.side_effect = Exception("Gemini quota exceeded")
-        yield mock_genai
+    with patch("ai_engine.rag_logic.genai.Client") as MockClient:
+        MockClient.side_effect = Exception("Gemini quota exceeded")
+        yield MockClient
 
 
 @pytest.fixture

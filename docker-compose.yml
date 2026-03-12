@@ -78,7 +78,8 @@ services:
     # FIX: Added migration step to the startup command [cite: 150]
     command: >
       sh -c 'python manage.py migrate --no-input &&
-             python manage.py runserver 0.0.0.0:8000'
+             python setup_pgvector.py &&
+             python manage.py runserver 0.0.0.0:8000 --noreload'
     volumes:
       - ./backend:/app
       - media_data:/app/media
@@ -88,7 +89,7 @@ services:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=rag_backend.settings
-      - DEBUG=${DEBUG:-True}
+      - DEBUG=True
       - POSTGRES_HOST=rag-db
       - REDIS_URL=redis://rag-redis:6379/0
       - CELERY_BROKER_URL=redis://rag-redis:6379/0
@@ -131,6 +132,12 @@ services:
         condition: service_healthy
       rag-vault:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A rag_backend inspect ping -d \"celery@$$HOSTNAME\" | grep -q OK"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - rag-network
 
@@ -147,6 +154,8 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=rag_backend.settings
       - REDIS_URL=redis://rag-redis:6379/0
+      - CELERY_BROKER_URL=redis://rag-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://rag-redis:6379/0
       - VAULT_ADDR=http://rag-vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-root}
     depends_on:
@@ -154,6 +163,12 @@ services:
         condition: service_healthy
       rag-vault:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import pathlib; raise SystemExit(0 if any('celery' in text and 'beat' in text for text in (path.read_text(errors='ignore') for path in pathlib.Path('/proc').glob('[0-9]*/cmdline'))) else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - rag-network
 
@@ -168,6 +183,12 @@ services:
       - "5173:8080"
     depends_on:
       - rag-backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - rag-network
 

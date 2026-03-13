@@ -1,34 +1,35 @@
 # CI/CD Pipeline Implementation Summary
 
-## ✅ Completed: Full CI/CD Pipeline for Academic Evaluation
+## ✅ Completed: Manual-Release CI/CD Pipeline for Academic Evaluation
 
 Date: March 7, 2026
 
 ## 📋 What Was Done
 
-### 1. Updated GitHub Actions Workflow
-**File**: [.github/workflows/ci-cd.yml](../.github/workflows/ci-cd.yml)
+### 1. Split GitHub Actions Workflows
+**Files**:
+- [.github/workflows/ci.yml](../.github/workflows/ci.yml)
+- [.github/workflows/deploy-aca.yml](../.github/workflows/deploy-aca.yml)
 
 **Changes**:
-- ✅ Migrated from Azure Container Registry (ACR) to Docker Hub
-- ✅ Configured automated deployment to Azure Container Apps
-- ✅ Added Docker Buildx with layer caching (faster builds)
-- ✅ Implemented post-deployment health checks
-- ✅ Updated security scanning for Docker Hub images
-- ✅ Added GitHub Actions summaries with deployment URLs
+- ✅ Split CI from deployment
+- ✅ CI now runs on push and PR without touching Azure
+- ✅ Deployment is manual only through `workflow_dispatch`
+- ✅ Registry is no longer hardcoded to ACR
+- ✅ GHCR is the default low-cost registry path
+- ✅ Azure Container Apps remains the runtime target
 
 **Pipeline Stages**:
 1. **Test**: Django tests + frontend build validation
-2. **Build & Push**: Docker Hub with SHA-based tags + `latest`
-3. **Deploy**: Azure Container Apps automatic update
-4. **Security Scan**: Trivy vulnerability scanning
+2. **Manual Build & Push**: Registry image push only when deploy is triggered
+3. **Manual Deploy**: Azure Container Apps update from selected git ref
 
 ### 2. Created GitHub Actions Setup Guide
 **File**: [.github/GITHUB_ACTIONS_SETUP.md](../.github/GITHUB_ACTIONS_SETUP.md)
 
 **Contents**:
 - Complete pipeline overview
-- Required secrets configuration (DOCKERHUB_TOKEN, AZURE_CREDENTIALS)
+- Required secrets configuration (`REGISTRY_USERNAME`, `REGISTRY_PASSWORD`, `AZURE_CREDENTIALS`)
 - Service Principal creation instructions
 - Monitoring and troubleshooting guides
 - Best practices for academic evaluation
@@ -58,21 +59,22 @@ Date: March 7, 2026
 ## 🎯 Pipeline Features
 
 ### Automation
-- ✅ Triggers on push to `main` or `develop` branches
+- ✅ Triggers CI on push to `main` or `develop`
 - ✅ Runs tests on every pull request
-- ✅ Builds images with git SHA tags (e.g., `a1b2c3d`)
-- ✅ Deploys to Azure Container Apps automatically
-- ✅ Performs health checks and reports status
+- ✅ Validates backend and frontend Docker builds in CI
+- ✅ Keeps Azure deployment manual
+- ✅ Performs health checks during manual deploy
 
 ### Cost Optimization
-- ✅ Uses Docker Hub (no ACR costs ~$5/month)
-- ✅ Docker layer caching (faster builds, less GitHub Actions minutes)
-- ✅ Deploys to Container Apps with KEDA scale-to-zero
+- ✅ No accidental Azure deployment on push
+- ✅ Registry can be GHCR or Docker Hub
+- ✅ Manual release control before cloud spend
+- ✅ ACA remains the Azure-native runtime target
 
 ### Security
-- ✅ Trivy vulnerability scanning
-- ✅ Results uploaded to GitHub Security tab
-- ✅ Scans for CRITICAL and HIGH severity issues
+- ✅ Azure deploy still requires explicit action
+- ✅ GitHub environment approvals can be added later
+- ✅ Image tagging is commit-based for traceability
 
 ### DevOps Best Practices
 - ✅ Conventional commit messages
@@ -107,10 +109,8 @@ Total: 3 meaningful commits, 883 lines added
    ```bash
    # Go to: https://github.com/VaibhavKumar2005/cloud-native-ai-library-system/settings/secrets/actions
    
-   # Add DOCKERHUB_TOKEN
-   # 1. Visit: https://hub.docker.com/settings/security
-   # 2. Create token: "GitHub Actions VeriRAG"
-   # 3. Copy and paste into GitHub secret
+   # Add REGISTRY_USERNAME and REGISTRY_PASSWORD
+   # GHCR recommended: use your GitHub username and a PAT with write:packages
    
    # Add AZURE_CREDENTIALS
    # Run this command and copy entire JSON output:
@@ -127,14 +127,14 @@ Total: 3 meaningful commits, 883 lines added
    .\deploy.ps1
    ```
 
-3. **Make a test commit** to trigger pipeline:
+3. **Make a test commit** to trigger CI:
    ```bash
    # Make a small change
    git commit --allow-empty -m "chore: trigger CI/CD pipeline test"
    git push origin main
    ```
 
-4. **Monitor pipeline**: https://github.com/VaibhavKumar2005/cloud-native-ai-library-system/actions
+4. **Trigger manual deployment** from the Actions tab when you want Azure updated
 
 5. **View deployment** at Container Apps URL (from Terraform output)
 
@@ -217,5 +217,5 @@ See [.github/GIT_WORKFLOW.md](../.github/GIT_WORKFLOW.md) for detailed examples.
 
 ---
 
-**Status**: ✅ CI/CD pipeline ready for academic evaluation
-**Next**: Add GitHub secrets and trigger first automated deployment
+**Status**: ✅ Manual-release CI/CD pipeline ready for academic evaluation
+**Next**: Add GitHub secrets/variables and trigger first manual ACA deployment

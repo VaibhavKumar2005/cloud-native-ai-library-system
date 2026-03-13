@@ -1,50 +1,38 @@
 # GitHub Actions CI/CD Setup Guide
 
-This guide explains how to set up automated CI/CD for VeriRAG using GitHub Actions, Azure Container Registry (ACR), and Azure Container Apps.
+This guide explains how to set up GitHub Actions for VeriRAG using automatic CI and manual Azure Container Apps deployment.
 
 ## 🎯 Pipeline Overview
 
-The CI/CD pipeline automatically:
-1. **Tests** - Runs Django tests and frontend build validation
-2. **Builds** - Creates optimized Docker images
-3. **Pushes** - Publishes to Azure Container Registry with versioned tags
-4. **Deploys** - Updates Azure Container Apps with new images
-5. **Scans** - Performs security vulnerability scanning
+The workflow setup now does this:
+1. **CI on push/PR** - Runs backend tests, frontend build validation, and Docker build checks
+2. **Manual deployment** - Builds images, pushes them to your chosen registry, and updates Azure Container Apps only when you trigger it
 
 ## 📋 Prerequisites
 
-Before the pipeline can run, you need:
- ✅ Azure Container Registry (ACR) deployed
-- ✅ Azure subscription with Container Apps deployed
-- ✅ Azure Service Principal with Container Apps permissions
+Before the workflows can run, you need:
+- Azure subscription with Container Apps already deployed
+- Azure Service Principal with Container Apps permissions
+- A container registry account:
+  - GitHub Container Registry (`ghcr.io`) recommended for showcase cost control
+  - Docker Hub also works
+  - ACR can still be used later without changing the app architecture
 
 ## 🔐 Required GitHub Secrets
 
 Go to your repository: **Settings → Secrets and variables → Actions → New repository secret**
 
-### 1. ACR Secrets (Registry Access)
+### 1. Registry Secrets
 
-**What**: Credentials to push images to your private Azure Container Registry.
+**What**: Credentials used by the manual deploy workflow to push images.
 
-**How to get**:
-```powershell
-# Get ACR Login Server
-az acr show --name <your-acr-name> --resource-group rg-verirag-dev --query loginServer --output tsv
+**Recommended setup for GHCR**:
+- Create a Personal Access Token with `write:packages`
+- Use your GitHub username as the registry username
 
-# Enable Admin User (if not enabled)
-az acr update --name <your-acr-name> --admin-enabled true
-
-# Get Username & Password
-az acr credential show --name <your-acr-name>
-```
-
-**Add to GitHub**:
-- Name: `ACR_LOGIN_SERVER`
-- Value: (e.g., `veriragregistry.azurecr.io`)
-- Name: `ACR_USERNAME`
-- Value: (from `az acr credential show`)
-- Name: `ACR_PASSWORD`
-- Value: (from `az acr credential show`)
+**Add to GitHub secrets**:
+- `REGISTRY_USERNAME`
+- `REGISTRY_PASSWORD`
 
 ### 2. AZURE_CREDENTIALS
 
@@ -89,7 +77,25 @@ az ad sp create-for-rbac `
 
 Go to: **Settings → Secrets and variables → Actions → Variables tab**
 
-### Optional: VITE_API_URL
+### Required Repository Variables
+
+Go to: **Settings → Secrets and variables → Actions → Variables tab**
+
+- `AZURE_RESOURCE_GROUP`
+- `BACKEND_APP_NAME`
+- `CELERY_APP_NAME`
+- `FRONTEND_APP_NAME`
+
+### Optional Repository Variables
+
+- `REGISTRY_SERVER`
+  - Default is `ghcr.io`
+  - Set to `docker.io` if you want Docker Hub
+  - Set to your ACR login server later if you migrate
+- `IMAGE_NAMESPACE`
+  - For GHCR: usually your GitHub username or org
+  - For Docker Hub: your Docker Hub namespace
+- `VITE_API_URL`
 
 **What**: Frontend API endpoint (optional, defaults to https://api.verirag.dev)
 
@@ -99,25 +105,50 @@ Go to: **Settings → Secrets and variables → Actions → Variables tab**
 
 ## 🚀 How the Pipeline Works
 
+## Workflow Structure
+
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+  - Runs automatically on push to `main` or `develop`
+  - Runs automatically on pull requests to `main`
+  - Does not deploy anything
+
+- [`.github/workflows/deploy-aca.yml`](../.github/workflows/deploy-aca.yml)
+  - Runs only on `workflow_dispatch`
+  - Builds images from the selected ref
+  - Pushes images to your configured registry
+  - Updates ACA manually
+
 ### Trigger Events
 
-**Main branch push** (production deployment):
+**Main branch push**:
 ```bash
 git add .
 git commit -m "feat: add new feature"
 git push origin main
 ```
 
-**Develop branch push** (builds images, no deployment):
+This runs CI only.
+
+**Develop branch push**:
 ```bash
 git checkout -b develop
 git push origin develop
 ```
 
-**Pull Request** (runs tests only):
+This also runs CI only.
+
+**Pull Request**:
 ```bash
 gh pr create --base main --head feature-branch
 ```
+
+This runs CI only.
+
+**Manual deploy**:
+1. Open the **Actions** tab
+2. Select `VeriRAG Manual ACA Deploy`
+3. Choose the `git_ref`
+4. Trigger the workflow
 
 ### Workflow Steps
 
@@ -126,26 +157,18 @@ gh pr create --base main --head feature-branch
 - Runs Django unit tests
 - Validates frontend build
 
-#### 2. Build & Push Stage
-- Generates git short SHA as image tag (e.g., `a1b2c3d`)
-- Builds Docker images with build cache optimization
-- Pushes to Azure Container Registry:
-  - `<acr-name>.azurecr.io/verirag-backend:a1b2c3d`
-  - `<acr-name>.azurecr.io/verirag-backend:latest`
-  - `<acr-name>.azurecr.io/verirag-frontend:a1b2c3d`
-  - `<acr-name>.azurecr.io/verirag-frontend:latest`
+#### 2. Manual Build & Push Stage
+- Generates git short SHA as image tag
+- Builds Docker images when you explicitly deploy
+- Pushes to the registry you configured
 
-#### 3. Deploy Stage (Main branch only)
+#### 3. Manual Deploy Stage
 - Logs into Azure using Service Principal
-- Updates backend Container App with new image
-- Updates Celery worker Container App with new image
-- Performs health check on `/api/health/`
-- Generates deployment summary
-
-#### 4. Security Scan Stage
-- Runs Trivy vulnerability scanner
-- Scans for CRITICAL and HIGH severity issues
-- Uploads results to GitHub Security tab
+- Updates backend ACA app
+- Updates Celery worker ACA app
+- Updates frontend ACA app
+- Performs backend health check on `/api/health/`
+- Publishes deployment summary
 
 ## 📊 Monitoring Pipeline Runs
 
@@ -169,10 +192,6 @@ az containerapp logs show \
   --resource-group rg-verirag-dev \
   --follow
 ```
-
-### GitHub Security Alerts
-- View security findings: **Security → Code scanning alerts**
-- Trivy reports appear automatically after each deployment
 
 ## 🎓 Best Practices for Academic Evaluation
 
@@ -251,7 +270,7 @@ git commit -m "fix stuff"
 ### Pipeline Fails on Docker Push
 **Error**: `denied: requested access to the resource is denied`
 
-**Fix**: Check that `ACR_USERNAME` and `ACR_PASSWORD` secrets are set correctly in GitHub.
+**Fix**: Check that `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` are set correctly and that the token can push to your chosen registry.
 
 ### Azure Deployment Fails
 **Error**: `az: command not found` or authentication error
@@ -283,9 +302,9 @@ git commit -m "fix stuff"
 
 ## 🎯 Quick Start Checklist
 
-- [ ] Add `ACR_LOGIN_SERVER` to GitHub Secrets
-- [ ] Add `ACR_USERNAME` to GitHub Secrets
-- [ ] Add `ACR_PASSWORD` to GitHub Secrets
+- [ ] Add `REGISTRY_USERNAME` to GitHub Secrets
+- [ ] Add `REGISTRY_PASSWORD` to GitHub Secrets
+- [ ] Add `AZURE_RESOURCE_GROUP`, `BACKEND_APP_NAME`, `CELERY_APP_NAME`, and `FRONTEND_APP_NAME` to repository variables
 - [ ] Add `AZURE_CREDENTIALS` to GitHub Secrets
 - [ ] Deploy infrastructure using `infrastructure/deploy.ps1`
 - [ ] Add API keys using `infrastructure/add-api-keys.ps1`

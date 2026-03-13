@@ -104,7 +104,7 @@ Dev mode automatically:
 
 ### Vault Setup (Production)
 
-For production, use the `init_vault.ps1` script which:
+For production, use the `scripts/setup/init_vault.ps1` script which:
 
 1. Initializes Vault with Shamir's Secret Sharing (`key-shares=1, key-threshold=1`)
 2. Saves unseal keys and root token to `vault_keys.txt`
@@ -275,7 +275,7 @@ if not DEBUG:
 
 The repository includes cleanup scripts to remove accidental secret exposure:
 
-- `security-cleanup.sh` (Linux/macOS)
-- `security-cleanup.ps1` (Windows/PowerShell)
+- `scripts/security/security-cleanup.sh` (Linux/macOS)
+- `scripts/security/security-cleanup.ps1` (Windows/PowerShell)
 
 These scripts scan for and remove hardcoded API keys, tokens, and passwords from the codebase.

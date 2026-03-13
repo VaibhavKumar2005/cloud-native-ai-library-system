@@ -72,7 +72,7 @@ services:
 
   # --- APPLICATION SERVICES ---
   rag-backend:
-    build: ./backend
+    build: ./apps/backend
     container_name: rag-backend
     # FIX: Removed user: "0:0" to use non-root user from Dockerfile [cite: 195, 197]
     # FIX: Added migration step to the startup command [cite: 150]
@@ -81,7 +81,7 @@ services:
              python setup_pgvector.py &&
              python manage.py runserver 0.0.0.0:8000 --noreload'
     volumes:
-      - ./backend:/app
+      - ./apps/backend:/app
       - media_data:/app/media
     ports:
       - "8000:8000"
@@ -108,12 +108,12 @@ services:
       - rag-network
 
   rag-celery-worker:
-    build: ./backend
+    build: ./apps/backend
     container_name: rag-celery-worker
     # FIX: Removed user: "0:0" to avoid running as root [cite: 197]
     command: celery -A rag_backend worker -l info -Q celery,ingestion,monitoring,maintenance
     volumes:
-      - ./backend:/app
+      - ./apps/backend:/app
       - media_data:/app/media
     env_file:
       - .env
@@ -142,12 +142,12 @@ services:
       - rag-network
 
   rag-celery-beat:
-    build: ./backend
+    build: ./apps/backend
     container_name: rag-celery-beat
     # FIX: Removed user: "0:0" to avoid running as root [cite: 197]
     command: celery -A rag_backend beat -l info
     volumes:
-      - ./backend:/app
+      - ./apps/backend:/app
       - celerybeat_schedule:/app/schedule
     env_file:
       - .env
@@ -175,7 +175,7 @@ services:
   # FIX: Added the missing frontend service [cite: 141, 142]
   rag-frontend:
     build:
-      context: ./frontend
+      context: ./apps/frontend
       args:
         VITE_API_URL: http://localhost:8000
     container_name: rag-frontend

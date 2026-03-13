@@ -140,7 +140,7 @@ Vault starts in **dev mode** by default with a root token of `root`. For product
 
 ```powershell
 # Windows (PowerShell)
-.\init_vault.ps1
+.\scripts\setup\init_vault.ps1
 ```
 
 **Manual Vault setup (cross-platform):**
@@ -164,7 +164,7 @@ docker exec rag-vault vault kv put secret/myapp \
   GROQ_API_KEY="gsk_..."
 ```
 
-> **Dev Mode:** When `VAULT_DEV_ROOT_TOKEN_ID=root` is set (default in docker-compose), Vault auto-initializes and unseals on startup. The `init_vault.ps1` script handles production initialization including key persistence to `vault_keys.txt`.
+> **Dev Mode:** When `VAULT_DEV_ROOT_TOKEN_ID=root` is set (default in docker-compose), Vault auto-initializes and unseals on startup. The `scripts/setup/init_vault.ps1` script handles production initialization including key persistence to `vault_keys.txt`.
 
 ### Step 4: Run Database Migrations
 
@@ -200,46 +200,59 @@ The frontend will be available at `http://localhost:5173` and the backend API at
 
 ```
 cloud-native-ai-library-system/
-├── backend/                    # Django REST API
-│   ├── ai_engine/              # Core RAG + Verification engine
-│   │   ├── rag_logic.py        # Dual-agent verification pipeline
-│   │   ├── views.py            # API endpoints
-│   │   ├── models.py           # Document model (multi-tenant)
-│   │   ├── tasks.py            # Celery async tasks
-│   │   ├── tracing.py          # OpenTelemetry integration
-│   │   └── benchmarks.py       # Performance benchmarks
-│   ├── rag_backend/            # Django project settings
-│   │   ├── settings.py         # Production-grade config
-│   │   ├── celery.py           # Celery app configuration
-│   │   └── urls.py             # URL routing
-│   ├── tests/                  # Pytest test suite
-│   │   ├── conftest.py         # Shared fixtures (mocked Vault)
-│   │   └── test_rag_logic.py   # RAG engine unit tests
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/                   # React + Vite + Tailwind CSS
-│   ├── src/
-│   │   ├── Dashboard.jsx       # Main library + AI chat (Bento Grid)
-│   │   ├── Monitoring.jsx      # Mission Control telemetry
-│   │   └── Analytics.jsx       # Query analytics dashboard
-│   └── package.json
-├── k8s/                        # Kubernetes manifests (GitOps-ready)
-│   ├── namespace.yaml          # verirag namespace
-│   ├── configmap.yaml          # Non-sensitive environment config
-│   ├── secrets.yaml            # Base64-encoded secrets (template)
-│   ├── deployment.yaml         # Backend, Celery, Redis deployments
-│   ├── service.yaml            # ClusterIP + NodePort services
-│   ├── statefulset.yaml        # PostgreSQL with persistent storage
-│   └── kustomization.yaml      # Kustomize resource manager
-├── infrastructure/             # Terraform (Azure ACR + AKS)
-│   └── main.tf
+├── apps/                       # Application services (frontend + backend)
+│   ├── backend/                # Django REST API
+│   │   ├── ai_engine/          # Core RAG + Verification engine
+│   │   │   ├── rag_logic.py    # Dual-agent verification pipeline
+│   │   │   ├── views.py        # API endpoints
+│   │   │   ├── models.py       # Document model (multi-tenant)
+│   │   │   ├── tasks.py        # Celery async tasks
+│   │   │   ├── tracing.py      # OpenTelemetry integration
+│   │   │   └── benchmarks.py   # Performance benchmarks
+│   │   ├── rag_backend/        # Django project settings
+│   │   │   ├── settings.py     # Production-grade config
+│   │   │   ├── celery.py       # Celery app configuration
+│   │   │   └── urls.py         # URL routing
+│   │   ├── tests/              # Pytest test suite
+│   │   │   ├── conftest.py     # Shared fixtures (mocked Vault)
+│   │   │   └── test_rag_logic.py # RAG engine unit tests
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   └── frontend/               # React + Vite + Tailwind CSS
+│       ├── src/
+│       │   ├── Dashboard.jsx   # Main library + AI chat (Bento Grid)
+│       │   ├── Monitoring.jsx  # Mission Control telemetry
+│       │   └── Analytics.jsx   # Query analytics dashboard
+│       └── package.json
+├── ops/                        # Operations & Infrastructure
+│   ├── k8s/                    # Kubernetes manifests (GitOps-ready)
+│   │   ├── namespace.yaml      # verirag namespace
+│   │   ├── configmap.yaml      # Non-sensitive environment config
+│   │   ├── secrets.yaml        # Base64-encoded secrets (template)
+│   │   ├── deployment.yaml     # Backend, Celery, Redis deployments
+│   │   ├── service.yaml        # ClusterIP + NodePort services
+│   │   ├── statefulset.yaml    # PostgreSQL with persistent storage
+│   │   └── kustomization.yaml  # Kustomize resource manager
+│   ├── infrastructure/         # Terraform (Azure ACR + AKS)
+│   │   └── main.tf
+│   ├── gitops/                 # ArgoCD GitOps configuration
+│   ├── helm/                   # Helm charts for production
+│   └── vault/                  # Vault development configuration
 ├── docs/                       # Extended documentation
 │   ├── ARCHITECTURE.md         # Dual-agent verification protocol
 │   ├── API_SPEC.md             # REST API reference
-│   └── SECURITY.md             # Vault + JWT + CSP security model
+│   ├── SECURITY.md             # Vault + JWT + CSP security model
+│   ├── guides/                 # Demo, deployment, testing guides
+│   ├── reports/                # Status, security, and summary docs
+│   └── showcase/               # Presentation-facing architecture material
+├── scripts/                    # Helper scripts grouped by purpose
+│   ├── demo/                   # Demo launch and health checks
+│   ├── security/               # Security audit and cleanup tools
+│   ├── setup/                  # Environment and Vault setup
+│   └── testing/                # API and pipeline test runners
 ├── docker-compose.yml          # Local development orchestration
 ├── prometheus.yml              # Prometheus scrape configuration
-└── init_vault.ps1              # Vault initialization script (Windows)
+└── railway.json                # Railway deployment configuration
 ```
 
 ---
@@ -255,7 +268,7 @@ pytest tests/ -v --tb=short
 pytest tests/ --cov=ai_engine --cov-report=term-missing
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the dual-agent verification logic and [docs/API_SPEC.md](docs/API_SPEC.md) for complete API documentation.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the dual-agent verification logic, [docs/API_SPEC.md](docs/API_SPEC.md) for complete API documentation, and [docs/README.md](docs/README.md) for the reorganized documentation index.
 
 ---
 
@@ -307,20 +320,21 @@ graph LR
 
 ### Quick Start
 
-1. **Add GitHub Secrets** (see [.github/GITHUB_ACTIONS_SETUP.md](.github/GITHUB_ACTIONS_SETUP.md)):
-   - `DOCKERHUB_TOKEN`: Docker Hub Personal Access Token
-   - `AZURE_CREDENTIALS`: Azure Service Principal JSON
+1. **Add GitHub secrets and variables** (see [.github/GITHUB_ACTIONS_SETUP.md](.github/GITHUB_ACTIONS_SETUP.md)):
+   - `REGISTRY_USERNAME`
+   - `REGISTRY_PASSWORD`
+   - `AZURE_CREDENTIALS`
 
-2. **Make a commit and push**:
+2. **Make a commit and push** to run CI only:
    ```bash
    git add .
    git commit -m "feat: add new feature with proper commit message"
    git push origin main
    ```
 
-3. **Monitor pipeline** at `https://github.com/VaibhavKumar2005/cloud-native-ai-library-system/actions`
+3. **Trigger deployment manually** from the GitHub Actions tab using `VeriRAG Manual ACA Deploy`
 
-4. **View deployment** after 5-10 minutes at your Azure Container Apps URL
+4. **View deployment** after the manual workflow completes at your Azure Container Apps URL
 
 For detailed setup instructions and best practices, see:
 - [GitHub Actions Setup Guide](.github/GITHUB_ACTIONS_SETUP.md)
@@ -348,6 +362,7 @@ For detailed setup instructions and best practices, see:
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Dual-agent (Gemini + Llama-3/Groq) verification protocol |
 | [API_SPEC.md](docs/API_SPEC.md) | Full REST API endpoint reference with request/response schemas |
 | [SECURITY.md](docs/SECURITY.md) | HashiCorp Vault integration, JWT auth, CSP policies |
+| [docs/README.md](docs/README.md) | Navigation index for guides, reports, and showcase material |
 
 ---
 

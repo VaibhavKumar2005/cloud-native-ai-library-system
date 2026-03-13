@@ -72,8 +72,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY_SERVER }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.repository_owner }}
+          password: ${{ env.REGISTRY_SERVER == 'ghcr.io' && secrets.GITHUB_TOKEN || secrets.REGISTRY_PASSWORD || secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push backend image
         uses: docker/build-push-action@v5
@@ -96,7 +96,7 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: ${{ secrets.AZURE_CREDENTIALS || secrets.AZURE_CREDENTIAL }}
 
       - name: Configure backend registry access
         if: ${{ inputs.deploy_backend }}
@@ -105,8 +105,8 @@ jobs:
             --name "${{ env.BACKEND_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
             --server "${{ env.REGISTRY_SERVER }}" \
-            --username "${{ secrets.REGISTRY_USERNAME }}" \
-            --password "${{ secrets.REGISTRY_PASSWORD }}" \
+            --username "${{ secrets.REGISTRY_USERNAME || github.repository_owner }}" \
+            --password "${{ env.REGISTRY_SERVER == 'ghcr.io' && secrets.GITHUB_TOKEN || secrets.REGISTRY_PASSWORD || secrets.DOCKERHUB_TOKEN }}" \
             --output none
 
       - name: Deploy backend image
@@ -125,8 +125,8 @@ jobs:
             --name "${{ env.CELERY_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
             --server "${{ env.REGISTRY_SERVER }}" \
-            --username "${{ secrets.REGISTRY_USERNAME }}" \
-            --password "${{ secrets.REGISTRY_PASSWORD }}" \
+            --username "${{ secrets.REGISTRY_USERNAME || github.repository_owner }}" \
+            --password "${{ env.REGISTRY_SERVER == 'ghcr.io' && secrets.GITHUB_TOKEN || secrets.REGISTRY_PASSWORD || secrets.DOCKERHUB_TOKEN }}" \
             --output none
 
       - name: Deploy worker image
@@ -145,8 +145,8 @@ jobs:
             --name "${{ env.FRONTEND_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
             --server "${{ env.REGISTRY_SERVER }}" \
-            --username "${{ secrets.REGISTRY_USERNAME }}" \
-            --password "${{ secrets.REGISTRY_PASSWORD }}" \
+            --username "${{ secrets.REGISTRY_USERNAME || github.repository_owner }}" \
+            --password "${{ env.REGISTRY_SERVER == 'ghcr.io' && secrets.GITHUB_TOKEN || secrets.REGISTRY_PASSWORD || secrets.DOCKERHUB_TOKEN }}" \
             --output none
 
       - name: Deploy frontend image

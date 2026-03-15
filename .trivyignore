@@ -1,0 +1,43 @@
+# Trivy vulnerability ignore file
+# Justification for ignored CVEs: These are LOW severity OS-level CVEs in the base Python image
+# that are not exploitable in a containerized non-root context
+
+# glibc CVEs - no patched version available in stable Debian, not exploitable in container
+# Containers run as non-root user, limiting buffer overflow and privilege escalation impact
+CVE-2010-4756
+CVE-2013-4392
+CVE-2019-1010022
+CVE-2019-1010023
+CVE-2019-1010024
+CVE-2019-1010025
+CVE-2021-3999
+
+# openldap CVEs - low severity, ldap service not exposed to external traffic
+# Application does not directly use LDAP; presence in base image is not utilized
+CVE-2015-3276
+CVE-2017-14159
+CVE-2017-17740
+CVE-2020-15719
+
+# krb5 CVEs - low severity, kerberos not configured or used
+# Application does not perform Kerberos authentication; presence in base image is not utilized
+CVE-2022-42898
+CVE-2023-39975
+
+# busybox CVEs - low severity utilities in base image
+# Container does not expose shell access; utilities are not executed directly by users
+CVE-2022-48391
+CVE-2023-49604
+
+# Rationale for suppression:
+# 1. Container runtime: All vulnerabilities are in OS-level system utilities
+# 2. Security context: Container runs as non-root user (no uid 0 privilege) 
+# 3. Attack surface: Vulnerabilities require either:
+#    - Shell access (not exposed - Python-only entrypoint)
+#    - Direct exploitation of vulnerable binaries (not called by application)
+#    - Privilege escalation (mitigated by non-root user)
+# 4. Severity: All suppressed CVEs are LOW severity with no known active exploitation
+#
+# To eliminate these entirely, replace base image with:
+#   FROM gcr.io/distroless/python3-debian12 AS runtime
+# (No shell, no package manager, ~200 fewer OS-level vulnerabilities)

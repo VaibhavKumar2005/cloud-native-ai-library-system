@@ -50,6 +50,8 @@ jobs:
   build-and-deploy:
     name: Manual Build and Deploy
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     environment:
       name: ${{ inputs.environment }}
       url: ${{ steps.summary.outputs.frontend_url }}
@@ -96,7 +98,7 @@ jobs:
           password: ${{ env.REGISTRY_SERVER == 'ghcr.io' && secrets.GITHUB_TOKEN || secrets.REGISTRY_PASSWORD || secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push backend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./apps/backend
           file: ./apps/backend/Dockerfile
@@ -104,7 +106,7 @@ jobs:
           tags: ${{ steps.meta.outputs.backend_image }}
 
       - name: Build and push frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./apps/frontend
           file: ./apps/frontend/Dockerfile

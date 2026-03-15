@@ -24,6 +24,8 @@ jobs:
   trivy-scan-frontend:
     name: Scan Frontend with Trivy
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
       - name: Checkout code
@@ -61,6 +63,8 @@ jobs:
   trivy-scan-dependencies:
     name: Scan Frontend Dependencies
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
       - name: Checkout code

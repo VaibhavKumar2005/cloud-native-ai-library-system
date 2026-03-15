@@ -24,6 +24,8 @@ jobs:
   trivy-scan-backend:
     name: Scan Backend with Trivy
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
       - name: Checkout code
@@ -61,6 +63,8 @@ jobs:
   trivy-scan-dependencies:
     name: Scan Backend Dependencies
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
       - name: Checkout code
@@ -85,6 +89,8 @@ jobs:
   python-bandit-scan:
     name: Scan Backend Code with Bandit
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     steps:
       - name: Checkout code

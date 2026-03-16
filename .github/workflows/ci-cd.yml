@@ -2,11 +2,6 @@ name: VeriRAG CI/CD Pipeline
 
 on:
   workflow_dispatch:  # Manual trigger only
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
     inputs:
       deploy_backend:
         description: 'Deploy backend'
@@ -20,6 +15,11 @@ on:
         description: 'Deploy frontend'
         required: true
         default: 'true'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 env:
   # Docker Registry
@@ -36,16 +36,15 @@ env:
   BACKEND_APP_NAME: ${{ vars.BACKEND_APP_NAME }}
   CELERY_APP_NAME: ${{ vars.CELERY_APP_NAME }}
   FRONTEND_APP_NAME: ${{ vars.FRONTEND_APP_NAME }}
+  
+  # Node.js 24 opt-in (required by June 2nd, 2026)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: read
   packages: write
   id-token: write
   security-events: write  # For uploading security scan results
-
-env:
-  # Node.js 24 opt-in (required by June 2nd, 2026)
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ============================================================================

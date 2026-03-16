@@ -190,35 +190,131 @@ jobs:
           build-args: |
             VITE_API_URL=${{ vars.VITE_API_URL || 'http://localhost:8000' }}
 
-      - name: Run Trivy scan on backend image
+      # ─────────────────────────────────────────────────────────────────────
+      # SECURITY SCANNING: Trivy (Vulnerabilities + Secrets + Config)
+      # ─────────────────────────────────────────────────────────────────────
+      
+      - name: "🔐 Scan Backend Image - Vulnerabilities"
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.meta.outputs.backend_image }}
+          scan-type: 'image'
           format: 'sarif'
-          output: 'trivy-backend.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
+          output: 'trivy-backend-vuln.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '1'  # Fail on vulnerabilities
+          timeout: '10m'
 
-      - name: Run Trivy scan on frontend image
+      - name: "🔐 Scan Backend - Configuration Issues"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.backend_image }}
+          scan-type: 'config'
+          format: 'sarif'
+          output: 'trivy-backend-config.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'  # Config issues don't block, but we report them
+
+      - name: "🔐 Scan Backend - Secrets & Credentials"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.backend_image }}
+          scan-type: 'secret'
+          format: 'sarif'
+          output: 'trivy-backend-secrets.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Always fail if secrets found
+
+      - name: "🔐 Scan Frontend Image - Vulnerabilities"
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.meta.outputs.frontend_image }}
+          scan-type: 'image'
           format: 'sarif'
-          output: 'trivy-frontend.sarif'
+          output: 'trivy-frontend-vuln.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '1'  # Fail on vulnerabilities
+          timeout: '10m'
+
+      - name: "🔐 Scan Frontend - Configuration Issues"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.frontend_image }}
+          scan-type: 'config'
+          format: 'sarif'
+          output: 'trivy-frontend-config.sarif'
           severity: 'CRITICAL,HIGH'
-          exit-code: '0'
+          exit-code: '0'  # Config issues don't block, but we report them
 
-      - name: Upload Trivy results to GitHub Security
+      - name: "🔐 Scan Frontend - Secrets & Credentials"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.meta.outputs.frontend_image }}
+          scan-type: 'secret'
+          format: 'sarif'
+          output: 'trivy-frontend-secrets.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Always fail if secrets found
+
+      # ─────────────────────────────────────────────────────────────────────
+      # UPLOAD SECURITY REPORTS TO GITHUB
+      # ─────────────────────────────────────────────────────────────────────
+      
+      - name: "📊 Upload Backend Vulnerability Report"
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: trivy-backend.sarif
+          sarif_file: 'trivy-backend-vuln.sarif'
+          category: 'trivy-backend-vulnerabilities'
 
-      - name: Upload Trivy results to GitHub Security
+      - name: "📊 Upload Backend Configuration Report"
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: trivy-frontend.sarif
+          sarif_file: 'trivy-backend-config.sarif'
+          category: 'trivy-backend-config'
+
+      - name: "📊 Upload Backend Secrets Report"
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-backend-secrets.sarif'
+          category: 'trivy-backend-secrets'
+
+      - name: "📊 Upload Frontend Vulnerability Report"
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-frontend-vuln.sarif'
+          category: 'trivy-frontend-vulnerabilities'
+
+      - name: "📊 Upload Frontend Configuration Report"
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-frontend-config.sarif'
+          category: 'trivy-frontend-config'
+
+      - name: "📊 Upload Frontend Secrets Report"
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-frontend-secrets.sarif'
+          category: 'trivy-frontend-secrets'
+
+      # ─────────────────────────────────────────────────────────────────────
+      # STORE SCAN ARTIFACTS FOR ANALYSIS
+      # ─────────────────────────────────────────────────────────────────────
+      
+      - name: "💾 Save Trivy Reports as Artifacts"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-security-reports
+          path: |
+            trivy-backend-*.sarif
+            trivy-frontend-*.sarif
+          retention-days: 30
 
       - name: Login to Azure via Workload Identity Federation
         uses: azure/login@v2

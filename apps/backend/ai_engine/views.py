@@ -22,6 +22,10 @@ from ai_engine.models import Document
 from ai_engine.serializers import DocumentSerializer
 from ai_engine.tasks import ingest_document_task
 from ai_engine.rag_logic import get_verified_answer
+from ai_engine.costops import get_cost_tracker
+from ai_engine.qualityops import get_quality_gate
+from ai_engine.promptops import get_prompt_ops
+from ai_engine.driftops import get_drift_ops
 from ai_engine.throttles import (
     QueryUserRateThrottle,
     UploadUserRateThrottle,
@@ -128,6 +132,17 @@ def query_llm(request):
             }
         )
         record_event("rag.query.received", {"rag.query.id": query_id})
+        
+        # ===================================================================
+        # OPS INTEGRATION: Get active prompt version for A/B testing
+        # ===================================================================
+        prompt_ops = get_prompt_ops()
+        active_prompt = None
+        try:
+            active_prompt = prompt_ops.get_active_version("rag_query")
+        except Exception as e:
+            logger.debug(f"No active prompt override: {e}")
+        
         result = get_verified_answer(
             user_query,
             user_id=request.user.id,
@@ -137,7 +152,74 @@ def query_llm(request):
                 "trace_id": get_trace_id(),
             },
         )
+        
+        # ===================================================================
+        # OPS INTEGRATION: Log costs, quality, drift after response
+        # ===================================================================
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        
+        # 1. CostOps: Track Azure OpenAI costs
+        try:
+            cost_tracker = get_cost_tracker()
+            cost_tracker.log_request(
+                operation="rag_query",
+                model=result.get("model_used", "unknown"),
+                tokens_used=result.get("tokens_used", 0),
+                cost=result.get("cost", 0.0),
+                metadata={
+                    "query_id": query_id,
+                    "user_id": request.user.id,
+                    "verification_passed": result.get("verification_passed", False),
+                }
+            )
+        except Exception as e:
+            logger.warning(f"CostOps logging failed: {e}")
+        
+        # 2. QualityOps: Evaluate response quality
+        try:
+            quality_gate = get_quality_gate()
+            quality_assessment = quality_gate.evaluate_response(
+                query=user_query,
+                response=result.get("answer", ""),
+                context_chunks=result.get("context_chunks_used", 0),
+                model_used=result.get("model_used", "unknown"),
+                scores={
+                    "faithfulness": result.get("evaluation", {}).get("faithfulness", 0.5),
+                    "answer_relevancy": result.get("evaluation", {}).get("answer_relevancy", 0.5),
+                    "context_precision": result.get("evaluation", {}).get("context_precision", 0.5),
+                    "context_recall": result.get("evaluation", {}).get("context_recall", 0.5),
+                }
+            )
+            result["quality_assessment"] = quality_assessment
+        except Exception as e:
+            logger.warning(f"QualityOps evaluation failed: {e}")
+        
+        # 3. DriftOps: Monitor for model and response drift
+        try:
+            drift_ops = get_drift_ops()
+            # Log response pattern for drift detection
+            drift_ops.log_response_pattern(
+                query=user_query,
+                response_length=len(result.get("answer", "")),
+                quality_score=result.get("evaluation", {}).get("combined_score", 0.5),
+                latency_ms=latency_ms,
+                has_hallucinations=not result.get("verification_passed", False),
+                avg_token_confidence=result.get("evaluation", {}).get("faithfulness", 0.95),
+            )
+            # Check for drift and include alerts in response
+            drift_alerts = drift_ops.get_recent_alerts(minutes=60)
+            if drift_alerts:
+                result["drift_alerts"] = [
+                    {
+                        "type": a.drift_type,
+                        "severity": a.severity,
+                        "description": a.description,
+                    }
+                    for a in drift_alerts[:3]  # Include top 3 recent alerts
+                ]
+        except Exception as e:
+            logger.warning(f"DriftOps monitoring failed: {e}")
+        
         trace_id = get_trace_id()
         result["query_id"] = query_id
         result["trace_id"] = trace_id

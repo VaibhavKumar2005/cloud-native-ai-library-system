@@ -2,6 +2,11 @@ name: VeriRAG CI/CD Pipeline
 
 on:
   workflow_dispatch:  # Manual trigger only
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
     inputs:
       deploy_backend:
         description: 'Deploy backend'
@@ -36,6 +41,11 @@ permissions:
   contents: read
   packages: write
   id-token: write
+  security-events: write  # For uploading security scan results
+
+env:
+  # Node.js 24 opt-in (required by June 2nd, 2026)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ============================================================================
@@ -45,8 +55,6 @@ jobs:
   ci:
     name: Test & Validate Code
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
     services:
       postgres:
@@ -72,10 +80,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # Node.js 24 compatible
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5  # Node.js 24 compatible
         with:
           python-version: "3.11"
           cache: pip
@@ -104,7 +112,7 @@ jobs:
           python manage.py test ai_engine.tests librarian.tests verifier.tests --verbosity=2 --no-input
 
       - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4  # Node.js 24 compatible
         with:
           node-version: "20"
           cache: npm

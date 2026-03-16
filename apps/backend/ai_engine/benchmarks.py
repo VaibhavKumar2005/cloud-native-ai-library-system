@@ -1,15 +1,26 @@
 """
 VeriRAG Evaluation Benchmarks
 Measures hallucination reduction effectiveness with real-world test cases.
+Integrates MLflow for experiment tracking and artifact management.
 """
 
 import os
 import json
 import time
 import logging
+import tempfile
+import pandas as pd
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional
 from datetime import datetime
+
+try:
+    import mlflow
+    from mlflow import log_metrics, log_params, log_artifact
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    mlflow = None
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +40,12 @@ class BenchmarkResult:
     hallucination_detected: bool
     passed: bool
     notes: str = ""
+    # RAGAS evaluation metrics (LLM-based)
+    ragas_faithfulness: float = 0.0  # Is answer grounded in context?
+    ragas_answer_relevancy: float = 0.0  # Does answer address the question?
+    ragas_context_precision: float = 0.0  # Are retrieved chunks relevant?
+    ragas_context_recall: float = 0.0  # Did we retrieve enough to answer?
+    ragas_combined_score: float = 0.0  # Weighted aggregate of above
 
 
 @dataclass
@@ -251,6 +268,41 @@ class VeriRAGBenchmark:
             not result.get("verification_passed", False)
         )
         
+        # Run RAGAS evaluation if available
+        ragas_scores = {
+            "ragas_faithfulness": 0.0,
+            "ragas_answer_relevancy": 0.0,
+            "ragas_context_precision": 0.0,
+            "ragas_context_recall": 0.0,
+            "ragas_combined_score": 0.0,
+        }
+        
+        try:
+            from ai_engine.rag_logic import evaluate_with_ragas
+            
+            # Extract context chunks if available
+            context_chunks = result.get("documents_used", [])
+            
+            ragas_result = evaluate_with_ragas(
+                query=query,
+                answer=result.get("answer", ""),
+                contexts=context_chunks,
+                ground_truth=None  # No ground truth in benchmark; can be added per-test if needed
+            )
+            
+            ragas_scores = {
+                "ragas_faithfulness": ragas_result.get("faithfulness", 0.0),
+                "ragas_answer_relevancy": ragas_result.get("answer_relevancy", 0.0),
+                "ragas_context_precision": ragas_result.get("context_precision", 0.0),
+                "ragas_context_recall": ragas_result.get("context_recall", 0.0),
+                "ragas_combined_score": ragas_result.get("combined_score", 0.0),
+            }
+            
+            logger.info(f"RAGAS evaluation for {test_case['id']}: faithfulness={ragas_scores['ragas_faithfulness']:.3f}, combined={ragas_scores['ragas_combined_score']:.3f}")
+            
+        except Exception as e:
+            logger.warning(f"RAGAS evaluation failed for {test_case['id']}: {e}")
+        
         benchmark_result = BenchmarkResult(
             test_id=test_case["id"],
             query=query,
@@ -263,14 +315,15 @@ class VeriRAGBenchmark:
             latency_ms=latency_ms,
             hallucination_detected=hallucination_detected,
             passed=passed,
-            notes=notes
+            notes=notes,
+            **ragas_scores  # Unpack RAGAS scores into the result
         )
         
         return benchmark_result
     
     def run_suite(self, test_cases: List[dict] = None, user_id: int = 1) -> BenchmarkSuite:
         """
-        Run complete benchmark suite.
+        Run complete benchmark suite with MLflow integration for experiment tracking.
         
         Args:
             test_cases: List of test cases (defaults to HALLUCINATION_TEST_CASES)
@@ -281,6 +334,19 @@ class VeriRAGBenchmark:
         """
         if test_cases is None:
             test_cases = HALLUCINATION_TEST_CASES
+        
+        # Initialize MLflow if available
+        if MLFLOW_AVAILABLE:
+            mlflow.set_experiment("verirag-hallucination-benchmarks")
+            run_name = f"benchmark_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            mlflow.start_run(run_name=run_name)
+            
+            # Log hyperparameters
+            mlflow.log_params({
+                "test_case_count": len(test_cases),
+                "user_id": user_id,
+                "suite_version": "v1.0",
+            })
         
         self.results = []
         model_fallback_count = 0
@@ -321,6 +387,37 @@ class VeriRAGBenchmark:
             model_fallback_count=model_fallback_count,
             results=[asdict(r) for r in self.results]
         )
+        
+        # Log metrics to MLflow
+        if MLFLOW_AVAILABLE:
+            mlflow.log_metrics({
+                "pass_rate": passed_tests / len(self.results) if self.results else 0,
+                "fail_rate": failed_tests / len(self.results) if self.results else 0,
+                "avg_faithfulness": avg_faithfulness,
+                "hallucination_prevention_rate": prevention_rate,
+                "avg_latency_ms": avg_latency,
+                "model_fallback_count": model_fallback_count,
+                "model_fallback_rate": model_fallback_count / len(self.results) if self.results else 0,
+            })
+            
+            # Log per-test results as a table (pandas DataFrame)
+            try:
+                df = pd.DataFrame(suite_result.results)
+                mlflow.log_table(df, "benchmark_results.json")
+            except Exception as e:
+                logger.warning(f"Could not log table to MLflow: {e}")
+            
+            # Log the full result JSON as artifact
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                    json.dump(asdict(suite_result), f, indent=2)
+                    temp_path = f.name
+                mlflow.log_artifact(temp_path, "benchmark_suite")
+                os.unlink(temp_path)
+            except Exception as e:
+                logger.warning(f"Could not log artifact to MLflow: {e}")
+            
+            mlflow.end_run()
         
         logger.info(f"✅ Benchmark complete: {passed_tests}/{len(self.results)} passed")
         logger.info(f"📊 Avg Faithfulness: {avg_faithfulness:.2%}")

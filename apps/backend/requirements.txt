@@ -26,6 +26,10 @@ sqlalchemy>=2.0.0  # Required for PGVector connection
 # Experiment Tracking (MLflow)
 mlflow>=2.10.0  # For benchmark tracking, model registry, and Azure ML integration
 
+# Evaluation & Benchmarking (RAGAS)
+ragas>=0.1.0  # LLM-based evaluation metrics (faithfulness, answer_relevancy, context_precision, context_recall)
+datasets>=2.0.0  # Required by RAGAS for dataset handling
+
 # Utilities
 requests==2.32.5
 pypdf>=5.5.0  # Was 5.1.0 - 15+ DoS CVEs via crafted PDFs fixed

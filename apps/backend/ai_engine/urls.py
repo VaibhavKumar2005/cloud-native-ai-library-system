@@ -15,6 +15,20 @@ from .ops_views import (
     quality_metrics_week,
     quality_metrics_month,
     ops_dashboard,
+    # PromptOps endpoints
+    prompt_versions,
+    prompt_active,
+    prompt_promote,
+    prompt_ab_tests,
+    prompt_ab_results,
+    # EvalOps endpoints
+    eval_datasets,
+    eval_runs,
+    eval_run_summary,
+    # DriftOps endpoints
+    drift_summary,
+    drift_alerts,
+    drift_acknowledge_alert,
 )
 
 # The router automatically handles /documents/ for CRUD operations
@@ -42,4 +56,27 @@ urlpatterns = [
     # Quality monitoring endpoints
     path('ops/quality/week/', quality_metrics_week, name='quality_metrics_week'),
     path('ops/quality/month/', quality_metrics_month, name='quality_metrics_month'),
+    
+    # =========================================================================
+    # PROMPT OPS ENDPOINTS (PromptOps)
+    # =========================================================================
+    path('ops/prompt/versions/<str:prompt_name>/', prompt_versions, name='prompt_versions'),
+    path('ops/prompt/active/<str:prompt_name>/', prompt_active, name='prompt_active'),
+    path('ops/prompt/promote/', prompt_promote, name='prompt_promote'),
+    path('ops/prompt/ab-tests/', prompt_ab_tests, name='prompt_ab_tests'),
+    path('ops/prompt/ab-tests/<str:test_id>/results/', prompt_ab_results, name='prompt_ab_results'),
+    
+    # =========================================================================
+    # EVAL OPS ENDPOINTS (EvalOps)
+    # =========================================================================
+    path('ops/eval/datasets/', eval_datasets, name='eval_datasets'),
+    path('ops/eval/runs/', eval_runs, name='eval_runs'),
+    path('ops/eval/runs/<str:run_id>/summary/', eval_run_summary, name='eval_run_summary'),
+    
+    # =========================================================================
+    # DRIFT OPS ENDPOINTS (DriftOps)
+    # =========================================================================
+    path('ops/drift/summary/', drift_summary, name='drift_summary'),
+    path('ops/drift/alerts/', drift_alerts, name='drift_alerts'),
+    path('ops/drift/alerts/<str:alert_id>/acknowledge/', drift_acknowledge_alert, name='drift_acknowledge_alert'),
 ]

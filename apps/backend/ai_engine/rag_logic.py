@@ -819,6 +819,13 @@ def get_verified_answer(query, user_id, request_context=None):
                     "verification_passed": False,
                     "model_used": "none",
                     "context_chunks_used": 0,
+                    "evaluation": {
+                        "faithfulness": 0.0,
+                        "answer_relevancy": 0.0,
+                        "context_precision": 0.0,
+                        "context_recall": 0.0,
+                        "combined_score": 0.0,
+                    }
                 }
 
             with trace_context(
@@ -858,6 +865,13 @@ def get_verified_answer(query, user_id, request_context=None):
                     "verification_passed": True,
                     "model_used": "none",
                     "context_chunks_used": 0,
+                    "evaluation": {
+                        "faithfulness": 0.0,
+                        "answer_relevancy": 0.0,
+                        "context_precision": 0.0,
+                        "context_recall": 0.0,
+                        "combined_score": 0.0,
+                    }
                 }
 
             context_parts = []
@@ -922,6 +936,13 @@ Respond with this exact JSON structure:
                     "verification_passed": False,
                     "model_used": model_used,
                     "context_chunks_used": len(docs),
+                    "evaluation": {
+                        "faithfulness": 0.0,
+                        "answer_relevancy": 0.0,
+                        "context_precision": 0.0,
+                        "context_recall": 0.0,
+                        "combined_score": 0.0,
+                    }
                 }
 
             answer = response_data.get("answer", "")
@@ -989,15 +1010,33 @@ JSON Response:
                     "rag.context.chunk_count": len(docs),
                 },
             ):
+                # Evaluate with RAGAS for LLM-based quality metrics
+                answer = response_data.get("answer", "Unable to generate response")
+                ragas_scores = evaluate_with_ragas(
+                    query=query,
+                    answer=answer,
+                    contexts=docs,
+                    ground_truth=None
+                )
+                
+                # Build response with both legacy and RAGAS metrics
                 final_response = {
-                    "answer": response_data.get("answer", "Unable to generate response"),
+                    "answer": answer,
                     "faithfulness_score": round(combined_score, 2),
                     "explanation": response_data.get("explanation", verification_explanation),
                     "source_citation": response_data.get("source_citation", source_citation),
                     "evidence_items": evidence_items,
                     "verification_passed": verification_passed,
                     "model_used": model_used,
-                    "context_chunks_used": len(docs)
+                    "context_chunks_used": len(docs),
+                    # RAGAS evaluation metrics (LLM-based quality judgment)
+                    "evaluation": {
+                        "faithfulness": ragas_scores.get("faithfulness", 0.5),
+                        "answer_relevancy": ragas_scores.get("answer_relevancy", 0.5),
+                        "context_precision": ragas_scores.get("context_precision", 0.5),
+                        "context_recall": ragas_scores.get("context_recall", 0.0),
+                        "combined_score": ragas_scores.get("combined_score", 0.5),
+                    }
                 }
                 record_event(
                     "rag.response.ready",
@@ -1005,6 +1044,7 @@ JSON Response:
                         "rag.response.model_used": model_used,
                         "rag.context.chunk_count": len(docs),
                         "rag.response.verification_passed": verification_passed,
+                        "rag.evaluation.faithfulness": ragas_scores.get("faithfulness", 0.5),
                     },
                 )
                 return final_response
@@ -1020,4 +1060,11 @@ JSON Response:
                 "verification_passed": False,
                 "model_used": "none",
                 "context_chunks_used": 0,
+                "evaluation": {
+                    "faithfulness": 0.0,
+                    "answer_relevancy": 0.0,
+                    "context_precision": 0.0,
+                    "context_recall": 0.0,
+                    "combined_score": 0.0,
+                }
             }

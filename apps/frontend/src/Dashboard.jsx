@@ -193,6 +193,7 @@ export default function Dashboard({ onLogout }) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [selectedFile, setSelectedFile] = useState(null)
   const [uploadError, setUploadError] = useState('')
   const [chatHistory, setChatHistory] = useState(() => {
@@ -312,20 +313,70 @@ export default function Dashboard({ onLogout }) {
     }
     setUploading(true)
     setUploadError('')
+    setUploadProgress(0)
+    
     const formData = new FormData()
     formData.append('file', selectedFile)
     formData.append('title', selectedFile.name)
-    try {
-      // Let the browser set multipart boundaries automatically.
-      await api.post('/api/documents/', formData)
-      fetchDocuments()
-      setSelectedFile(null)
-    } catch (err) {
-      console.error("Upload failed", err)
-      const serverDetail = err?.response?.data?.detail || err?.response?.data?.error || err?.message
-      setUploadError(serverDetail || 'Upload failed. Please re-login and try again.')
-    }
-    setUploading(false)
+    
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest()
+      
+      // Track upload progress
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          const progress = Math.round((e.loaded / e.total) * 100)
+          setUploadProgress(progress)
+        }
+      })
+      
+      // Handle completion
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          // Success
+          setUploadProgress(100)
+          fetchDocuments()
+          setSelectedFile(null)
+          setUploadError('')
+          setTimeout(() => {
+            setUploading(false)
+            setUploadProgress(0)
+          }, 800)
+        } else {
+          // Server error
+          const response = JSON.parse(xhr.responseText)
+          const message = response?.detail || response?.error || `Upload failed (${xhr.status})`
+          setUploadError(`❌ ${message}`)
+          setUploading(false)
+          setUploadProgress(0)
+        }
+        resolve()
+      })
+      
+      // Handle network errors
+      xhr.addEventListener('error', () => {
+        setUploadError('❌ Network error. Check your connection.')
+        setUploading(false)
+        setUploadProgress(0)
+        resolve()
+      })
+      
+      xhr.addEventListener('abort', () => {
+        setUploadError('❌ Upload cancelled')
+        setUploading(false)
+        setUploadProgress(0)
+        resolve()
+      })
+      
+      // Set auth header
+      const token = localStorage.getItem('auth_token')
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      }
+      
+      xhr.open('POST', '/api/documents/')
+      xhr.send(formData)
+    })
   }
 
   const handleQuery = async (e) => {
@@ -343,8 +394,24 @@ export default function Dashboard({ onLogout }) {
       setQuery('')
     } catch (err) {
       console.error("AI Error", err)
-      const serverDetail = err?.response?.data?.detail || err?.response?.data?.error || err?.message
-      setQueryError(serverDetail || 'Query failed. Please try again.')
+      const serverData = err?.response?.data || {}
+      
+      // Extract detailed error message
+      let errorMessage = 'Query failed. Please try again.'
+      if (serverData.detail) {
+        errorMessage = serverData.detail
+      } else if (serverData.error) {
+        errorMessage = serverData.error
+      } else if (err?.message === 'Network Error') {
+        errorMessage = 'Network error. Check your connection.'
+      } else if (err?.response?.status === 401) {
+        errorMessage = 'Session expired. Please log in again.'
+        setTimeout(() => window.location.href = '/login', 1500)
+      } else if (err?.response?.status === 429) {
+        errorMessage = 'Too many requests. Please wait a moment.'
+      }
+      
+      setQueryError(`❌ ${errorMessage}`)
     }
     setLoading(false)
   }
@@ -514,20 +581,55 @@ export default function Dashboard({ onLogout }) {
                     </DialogTitle>
                   </DialogHeader>
                   <div className="py-4 flex flex-col gap-4">
-                    <Input type="file" accept=".pdf" onChange={(e) => setSelectedFile(e.target.files[0])} className="bg-white/5 border-white/10 rounded-xl" />
+                    <Input 
+                      type="file" 
+                      accept=".pdf" 
+                      onChange={(e) => {
+                        setSelectedFile(e.target.files[0])
+                        setUploadError('')
+                      }} 
+                      className="bg-white/5 border-white/10 rounded-xl"
+                      disabled={uploading}
+                    />
+                    
+                    {/* Error Message */}
                     {uploadError && (
-                      <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                        {uploadError}
-                      </p>
+                      <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 flex items-start gap-2">
+                        <span className="mt-0.5">⚠️</span>
+                        <span>{uploadError}</span>
+                      </div>
                     )}
-                    {selectedFile && (
-                      <Button onClick={handleFileUpload} disabled={uploading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl">
-                    {uploading ? "Queueing Document..." : "Upload to Library"}
-                      </Button>
-                    )}
+                    
+                    {/* Upload Progress Bar */}
                     {uploading && (
-                      <div className="flex items-center justify-center gap-2 text-xs text-indigo-400 animate-pulse">
-                        <Cpu className="w-3.5 h-3.5 animate-spin" /> Queueing ingestion job...
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs text-slate-400">
+                          <span>Uploading... {uploadProgress}%</span>
+                          <span className="text-emerald-400 font-mono">{uploadProgress}%</span>
+                        </div>
+                        <Progress value={uploadProgress} className="h-2 bg-white/5" />
+                      </div>
+                    )}
+                    
+                    {/* Upload Button */}
+                    {selectedFile && !uploading && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-slate-400">📄 {selectedFile.name}</p>
+                        <Button 
+                          onClick={handleFileUpload} 
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl"
+                        >
+                          <Upload className="w-3.5 h-3.5 mr-2" />
+                          Upload to Library
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {/* Success State */}
+                    {uploading && uploadProgress === 100 && (
+                      <div className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2 flex items-center gap-2 animate-pulse">
+                        <span>✓</span>
+                        <span>Upload complete! Processing document...</span>
                       </div>
                     )}
                   </div>

@@ -238,6 +238,57 @@ else:
         }
     }
 
+# --- 3a. AZURE AI & SEARCH CONFIGURATION ---
+# ────────────────────────────────────────────
+# Local mode: Read from environment variables (set via .env or docker-compose)
+# Cloud mode: Read from Azure Key Vault using Managed Identity
+# Production: NEVER put keys in environment — use Key Vault only
+
+_azure_openai_endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT', '').strip()
+_azure_openai_key_env = os.environ.get('AZURE_OPENAI_KEY', '').strip()
+_azure_search_endpoint = os.environ.get('AZURE_SEARCH_ENDPOINT', '').strip()
+_azure_search_key_env = os.environ.get('AZURE_SEARCH_KEY', '').strip()
+
+# In cloud mode, try to fetch from Key Vault (Managed Identity does auth)
+if DEPLOY_MODE == 'cloud' and AZURE_KEY_VAULT_URL:
+    logger.info("🔐 Loading Azure credentials from Key Vault (Managed Identity)")
+    _azure_openai_key = get_secret('AZURE-OPENAI-KEY', 'azure-openai-key')
+    _azure_search_key = get_secret('AZURE-SEARCH-KEY', 'azure-search-key')
+else:
+    # Local mode: use environment variables
+    _azure_openai_key = _azure_openai_key_env
+    _azure_search_key = _azure_search_key_env
+
+AZURE_OPENAI_ENDPOINT = _azure_openai_endpoint
+AZURE_OPENAI_KEY = _azure_openai_key
+AZURE_OPENAI_DEPLOYMENT = os.environ.get('AZURE_OPENAI_DEPLOYMENT', 'gpt-4-turbo')
+
+AZURE_SEARCH_ENDPOINT = _azure_search_endpoint
+AZURE_SEARCH_KEY = _azure_search_key
+AZURE_SEARCH_INDEX = os.environ.get('AZURE_SEARCH_INDEX', 'verirag-documents')
+
+# Validate Azure services configuration
+if not DEBUG:
+    missing_azure = []
+    if not AZURE_OPENAI_ENDPOINT:
+        missing_azure.append('AZURE_OPENAI_ENDPOINT')
+    if not AZURE_OPENAI_KEY:
+        missing_azure.append('AZURE_OPENAI_KEY (set in Key Vault or env)')
+    if not AZURE_SEARCH_ENDPOINT:
+        missing_azure.append('AZURE_SEARCH_ENDPOINT')
+    if not AZURE_SEARCH_KEY:
+        missing_azure.append('AZURE_SEARCH_KEY (set in Key Vault or env)')
+    
+    if missing_azure:
+        raise ValueError(
+            f"❌ Azure services not fully configured in production. Missing: {', '.join(missing_azure)}\n"
+            f"ℹ️  For local dev: Set AZURE_OPENAI_KEY and AZURE_SEARCH_KEY in .env\n"
+            f"ℹ️  For cloud: Set AZURE_KEY_VAULT_URL and add secrets to Azure Key Vault"
+        )
+
+logger.info("✅ Azure OpenAI configured: %s (%s)", AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT)
+logger.info("✅ Azure AI Search configured: %s", AZURE_SEARCH_ENDPOINT)
+
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=2),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -292,6 +343,33 @@ REST_FRAMEWORK = {
         'document_action': '60/hour',
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# --- 5. API DOCUMENTATION (Swagger/OpenAPI) ---
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'VeriRAG API',
+    'DESCRIPTION': 'Azure-powered Cloud-Native RAG System with Hallucination Prevention | Powered by Azure OpenAI + Azure AI Search + Azure PostgreSQL',
+    'VERSION': '2.0.0',
+    'SCHEMA_PATH_PREFIX': r'/api',
+    'AUTHENTICATION_FLOWS': {
+        'jwtAuth': {
+            'type': 'http',
+            'scheme': 'bearer',
+            'bearerFormat': 'JWT',
+        }
+    },
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header'
+        }
+    },
+    'SERVERS': [
+        {'url': 'http://localhost:8000', 'description': 'Local Development (Docker)'},
+        {'url': 'https://verirag-backend.azurecontainerapps.io', 'description': 'Azure Container Apps'},
+        {'url': 'https://verirag-api.azurewebsites.net', 'description': 'Azure App Service'},
+    ],
 }
 
 # --- 5. NETWORKING (CORS & CSP) ---

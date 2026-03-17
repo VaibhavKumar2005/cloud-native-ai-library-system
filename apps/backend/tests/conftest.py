@@ -131,21 +131,23 @@ def mock_vault_unreachable():
 
 @pytest.fixture
 def mock_gemini():
-    """Mock Google Gemini API responses."""
-    with patch("ai_engine.rag_logic.genai.Client") as MockClient:
-        mock_client = MockClient.return_value
+    """Mock Azure OpenAI API responses (the actual primary LLM, not Google Gemini)."""
+    with patch("ai_engine.rag_logic.AzureOpenAI") as MockAzureOpenAI:
+        mock_client = MockAzureOpenAI.return_value
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"answer": "Test answer from Azure OpenAI", "faithfulness_score": 0.85, "explanation": "Found in context", "source_citation": "Page 3"}'
         mock_response = MagicMock()
-        mock_response.text = '{"answer": "Test answer from Gemini", "faithfulness_score": 0.85, "explanation": "Found in context", "source_citation": "Page 3"}'
-        mock_client.models.generate_content.return_value = mock_response
+        mock_response.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_response
         yield mock_client
 
 
 @pytest.fixture
 def mock_gemini_failing():
-    """Mock a failing Gemini API."""
-    with patch("ai_engine.rag_logic.genai.Client") as MockClient:
-        MockClient.side_effect = Exception("Gemini quota exceeded")
-        yield MockClient
+    """Mock Azure OpenAI API failure (the actual primary LLM)."""
+    with patch("ai_engine.rag_logic.AzureOpenAI") as MockAzureOpenAI:
+        MockAzureOpenAI.side_effect = Exception("Azure OpenAI quota exceeded")
+        yield MockAzureOpenAI
 
 
 @pytest.fixture

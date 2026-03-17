@@ -122,9 +122,9 @@ class TestLLMFailover:
     """Tests for the dual-LLM failover mechanism."""
 
     def test_gemini_primary_success(self, mock_vault, mock_gemini):
-        """Should use Gemini as primary and return its response."""
+        """Should use Azure OpenAI (primary LLM) and return its response."""
         response, model = call_llm_with_fallback("test prompt", "fake-api-key")
-        assert model == "gemini"
+        assert model == "azure_openai"
         parsed = json.loads(response)
         assert "answer" in parsed
 
@@ -165,7 +165,7 @@ class TestLLMFailover:
                 request_context={"query_id": "q-123", "trace_id": "abc123"},
             )
 
-            assert result["model_used"] == "gemini"
+            assert result["model_used"] == "azure_openai"
             assert result["context_chunks_used"] == 1
 
 
@@ -229,7 +229,7 @@ class TestQueryTracingMetadata:
             "source_citation": "Page 1",
             "evidence_items": [],
             "verification_passed": True,
-            "model_used": "gemini",
+            "model_used": "azure_openai",
             "context_chunks_used": 1,
         }
 
@@ -381,7 +381,7 @@ class TestQueryEndpoint:
                     }
                 ],
                 "verification_passed": True,
-                "model_used": "gemini",
+                "model_used": "azure_openai",
                 "context_chunks_used": 3,
             }
             response = api_client.post("/api/query/", {"query": "What is AI?"})

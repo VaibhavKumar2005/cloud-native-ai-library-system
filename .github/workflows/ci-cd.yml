@@ -13,7 +13,6 @@ env:
   ACR_REGISTRY: acrvaibhavrag2026.azurecr.io
   ACR_REPOSITORY: verirag
   IMAGE_TAG: ${{ github.sha }}
-  IMAGE_TAG_SHORT: ${{ github.sha:0:8 }}
   
   # Azure Environment (from secrets and variables)
   AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -44,7 +43,14 @@ jobs:
     name: Validate Environment
     runs-on: ubuntu-latest
     
+    outputs:
+      image-tag-short: ${{ steps.short-sha.outputs.short-sha }}
+    
     steps:
+      - name: Generate short SHA
+        id: short-sha
+        run: echo "short-sha=${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
+      
       - name: Check required variables
         run: |
           MISSING_VARS=()
@@ -291,7 +297,7 @@ jobs:
     name: Build & Push to ACR
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [ci, security]
+    needs: [validate-environment, ci, security]
     if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     
     outputs:
@@ -349,13 +355,13 @@ jobs:
           push: true
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:latest
-            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ env.IMAGE_TAG_SHORT }}
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ needs.validate-environment.outputs.image-tag-short }}
           cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:buildcache
           cache-to: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:buildcache,mode=max
 
       - name: Set backend image output
         id: build-backend-output
-        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ env.IMAGE_TAG_SHORT }}" >> "$GITHUB_OUTPUT"
+        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ needs.validate-environment.outputs.image-tag-short }}" >> "$GITHUB_OUTPUT"
 
       - name: Build & push frontend image
         id: build-frontend
@@ -366,7 +372,7 @@ jobs:
           push: true
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:latest
-            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ env.IMAGE_TAG_SHORT }}
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ needs.validate-environment.outputs.image-tag-short }}
           cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:buildcache
           cache-to: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:buildcache,mode=max
           build-args: |
@@ -374,7 +380,7 @@ jobs:
 
       - name: Set frontend image output
         id: build-frontend-output
-        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ env.IMAGE_TAG_SHORT }}" >> "$GITHUB_OUTPUT"
+        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ needs.validate-environment.outputs.image-tag-short }}" >> "$GITHUB_OUTPUT"
 
   # ============================================================================
   # STAGE 4: DEPLOY TO AZURE CONTAINER APPS

@@ -163,8 +163,10 @@ jobs:
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: testpassword
           REDIS_URL: redis://localhost:6379/0
-          OTEL_ENABLED: 'false'          AZURE_OPENAI_ENDPOINT: 'https://ci-test.openai.azure.com/'
-          AZURE_OPENAI_KEY: 'ci-test-key-placeholder'          PYTHONPATH: .
+          OTEL_ENABLED: 'false'          
+          AZURE_OPENAI_ENDPOINT: 'https://ci-test.openai.azure.com/'
+          AZURE_OPENAI_KEY: 'ci-test-key-placeholder'          
+          PYTHONPATH: .
         run: |
           pip install pytest pytest-django pytest-cov
           

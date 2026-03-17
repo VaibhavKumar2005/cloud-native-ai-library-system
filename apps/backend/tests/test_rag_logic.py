@@ -123,14 +123,14 @@ class TestLLMFailover:
 
     def test_gemini_primary_success(self, mock_vault, mock_gemini):
         """Should use Azure OpenAI (primary LLM) and return its response."""
-        response, model = call_llm_with_fallback("test prompt", "fake-api-key")
+        response, model = call_llm_with_fallback("test prompt")
         assert model == "azure_openai"
         parsed = json.loads(response)
         assert "answer" in parsed
 
     def test_failover_to_groq_on_gemini_failure(self, mock_vault, mock_gemini_failing, mock_groq):
         """Should failover to Groq when Gemini fails."""
-        response, model = call_llm_with_fallback("test prompt", "fake-api-key")
+        response, model = call_llm_with_fallback("test prompt")
         assert model == "groq"
         parsed = json.loads(response)
         assert "answer" in parsed
@@ -138,7 +138,7 @@ class TestLLMFailover:
     def test_both_llms_fail_returns_error(self, mock_vault, mock_gemini_failing):
         """Should return error JSON when both LLMs fail."""
         with patch("ai_engine.rag_logic.call_groq_llama", side_effect=Exception("Groq down")):
-            response, model = call_llm_with_fallback("test prompt", "fake-api-key")
+            response, model = call_llm_with_fallback("test prompt")
             assert model == "error"
             parsed = json.loads(response)
             assert parsed["verification_passed"] is False

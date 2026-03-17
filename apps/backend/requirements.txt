@@ -4,24 +4,24 @@ Django>=5.1.7  # Was 5.0.2 - Multiple SQL injection and DoS vulnerabilities fixe
 djangorestframework>=3.15.2  # Was 3.14.0 - XSS via break_long_headers fixed (CVE-2024-#21/#133)
 python-dotenv==1.0.1
 django-cors-headers==4.3.1
+drf-spectacular>=0.27.0  # API documentation (Swagger/OpenAPI)
 gunicorn>=23.0.0  # Was 21.2.0 - HTTP Request Smuggling vulnerabilities fixed (CVE-2024-1135)
 wheel>=0.46.0  # Malicious wheel unpacking CVE-2024-38335 fixed
 jaraco.context>=6.0.0  # Path traversal via malicious tar archives CVE-2024-6345 fixed
 
-# AI & LLM (Google Gemini + LangChain + Fallback)
-google-genai>=0.1.0
+# AI & LLM (Azure OpenAI + LangChain + Fallback)
+openai>=1.3.0  # Azure OpenAI + Groq fallback
 langchain>=0.3.7
-langchain-google-genai>=2.0.4
+langchain-openai>=0.1.0  # Azure OpenAI integration for LangChain
 langchain-community>=0.3.7
 langchain-core>=0.3.15
 langchain-text-splitters>=0.3.2
-langchain-postgres>=0.0.14  # Replace deprecated community vectorstore (latest stable)
-openai>=1.0.0  # Required for Groq/Llama-3 fallback logic
+azure-search-documents>=11.4.0  # Azure AI Search vector search
 
 # Database & Vector Store
 psycopg2-binary==2.9.9
-pgvector==0.3.6
-sqlalchemy>=2.0.0  # Required for PGVector connection
+sqlalchemy>=2.0.0  # Required for PostgreSQL ORM
+azure-storage-blob>=12.19.0  # For document storage (alternative to local filesystem)
 
 # Experiment Tracking (MLflow)
 mlflow>=2.10.0  # For benchmark tracking, model registry, and Azure ML integration

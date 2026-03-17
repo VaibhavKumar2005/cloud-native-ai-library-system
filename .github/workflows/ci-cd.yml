@@ -82,6 +82,7 @@ jobs:
           DJANGO_SETTINGS_MODULE: rag_backend.settings
           DJANGO_SECRET_KEY: ci-test-key
           DEBUG: 'False'
+          ALLOWED_HOSTS: 'localhost,127.0.0.1,0.0.0.0,backend,rag-backend'
           POSTGRES_HOST: localhost
           POSTGRES_PORT: '5432'
           POSTGRES_DB: verirag_db

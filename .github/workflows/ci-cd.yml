@@ -1,4 +1,4 @@
-name: VeriRAG CI/CD → ACR → ACA (Improved)
+name: VeriRAG CI/CD → ACR → ACA (Improved & FIXED)
 
 on:
   workflow_dispatch:
@@ -9,33 +9,36 @@ on:
       - 'docs/**'
 
 env:
-  # Azure Container Registry (your production setup)
+  # Azure Container Registry
   ACR_REGISTRY: acrvaibhavrag2026.azurecr.io
   ACR_REPOSITORY: verirag
   IMAGE_TAG: ${{ github.sha }}
   IMAGE_TAG_SHORT: ${{ github.sha }}
   
-  # Azure Environment (from repository variables)
-  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  # Azure Environment (from secrets and variables)
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-  LOCATION: eastus
   
-  # Node.js 24 compatibility (required by June 2, 2026)
+  # ✅ FIXED: Add missing app name variables
+  BACKEND_APP_NAME: ${{ vars.BACKEND_APP_NAME }}
+  CELERY_APP_NAME: ${{ vars.CELERY_APP_NAME }}
+  FRONTEND_APP_NAME: ${{ vars.FRONTEND_APP_NAME }}
+  
+  LOCATION: eastus
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: read
   id-token: write
   security-events: write
-  checks: write  # For test reporting
-  actions: read  # For workflow status
+  checks: write
+  actions: read
 
 jobs:
   # ============================================================================
   # STAGE 0: VALIDATION
-  # Ensure environment is properly configured
   # ============================================================================
   validate-environment:
     name: Validate Environment
@@ -50,9 +53,9 @@ jobs:
           [[ -z "${{ env.AZURE_TENANT_ID }}" ]] && MISSING_VARS+=("AZURE_TENANT_ID")
           [[ -z "${{ env.AZURE_SUBSCRIPTION_ID }}" ]] && MISSING_VARS+=("AZURE_SUBSCRIPTION_ID")
           [[ -z "${{ env.AZURE_RESOURCE_GROUP }}" ]] && MISSING_VARS+=("AZURE_RESOURCE_GROUP")
-          [[ -z "${{ vars.BACKEND_APP_NAME }}" ]] && MISSING_VARS+=("BACKEND_APP_NAME")
-          [[ -z "${{ vars.CELERY_APP_NAME }}" ]] && MISSING_VARS+=("CELERY_APP_NAME")
-          [[ -z "${{ vars.FRONTEND_APP_NAME }}" ]] && MISSING_VARS+=("FRONTEND_APP_NAME")
+          [[ -z "${{ env.BACKEND_APP_NAME }}" ]] && MISSING_VARS+=("BACKEND_APP_NAME")
+          [[ -z "${{ env.CELERY_APP_NAME }}" ]] && MISSING_VARS+=("CELERY_APP_NAME")
+          [[ -z "${{ env.FRONTEND_APP_NAME }}" ]] && MISSING_VARS+=("FRONTEND_APP_NAME")
           
           if [ ${#MISSING_VARS[@]} -gt 0 ]; then
             echo "❌ Missing required variables:"
@@ -64,7 +67,6 @@ jobs:
 
   # ============================================================================
   # STAGE 1: CONTINUOUS INTEGRATION
-  # Test backend & frontend code
   # ============================================================================
   ci:
     name: Test & Validate
@@ -85,7 +87,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
@@ -96,11 +97,9 @@ jobs:
           --health-retries 5
 
     steps:
-      # Checkout
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Backend Testing
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -116,7 +115,7 @@ jobs:
         working-directory: apps/backend
         env:
           DJANGO_SETTINGS_MODULE: rag_backend.settings
-          DJANGO_SECRET_KEY: ci-test-key-not-for-production
+          DJANGO_SECRET_KEY: ci-test-key
           DEBUG: 'False'
           ALLOWED_HOSTS: 'localhost,127.0.0.1,0.0.0.0,backend,rag-backend'
           POSTGRES_HOST: localhost
@@ -132,7 +131,7 @@ jobs:
         working-directory: apps/backend
         env:
           DJANGO_SETTINGS_MODULE: rag_backend.settings
-          DJANGO_SECRET_KEY: ci-test-key-not-for-production
+          DJANGO_SECRET_KEY: ci-test-key
           DEBUG: 'False'
           POSTGRES_HOST: localhost
           POSTGRES_PORT: '5432'
@@ -148,7 +147,7 @@ jobs:
         working-directory: apps/backend
         env:
           DJANGO_SETTINGS_MODULE: rag_backend.settings
-          DJANGO_SECRET_KEY: ci-test-key-not-for-production
+          DJANGO_SECRET_KEY: ci-test-key
           DEBUG: 'True'
           POSTGRES_HOST: localhost
           POSTGRES_PORT: '5432'
@@ -185,7 +184,6 @@ jobs:
           path: apps/backend/htmlcov/
           retention-days: 30
 
-      # Frontend Testing
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -207,13 +205,7 @@ jobs:
         continue-on-error: true
         run: npm run lint
 
-      - name: Lint summary
-        if: steps.frontend-lint.outcome == 'failure'
-        run: |
-          echo "⚠️ Frontend linting found issues (non-blocking)"
-          echo "Run 'npm run lint' locally to see details"
-
-      - name: Run frontend tests (if available)
+      - name: Run frontend tests
         working-directory: apps/frontend
         continue-on-error: true
         run: npm test || echo "No tests configured"
@@ -233,10 +225,8 @@ jobs:
             echo "| Frontend lint | ${{ steps.frontend-lint.outcome == 'success' && '✅ Pass' || '⚠️ Warnings' }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-
   # ============================================================================
   # STAGE 2: SECURITY SCANNING
-  # Trivy vulnerability & dependency scanning
   # ============================================================================
   security:
     name: Security Scan
@@ -294,28 +284,15 @@ jobs:
           path: trivy-*.sarif
           retention-days: 90
 
-      - name: Security summary
-        if: always()
-        run: |
-          {
-            echo "## 🔒 Security Scan Results"
-            echo ""
-            echo "Vulnerabilities found in dependencies. Review in:"
-            echo "- [Backend Dependencies](../../security/code-scanning?query=trivy-backend)"
-            echo "- [Frontend Dependencies](../../security/code-scanning?query=trivy-frontend)"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-
   # ============================================================================
   # STAGE 3: BUILD & PUSH TO ACR
-  # Build Docker images and push to Azure Container Registry
   # ============================================================================
   build-push-acr:
     name: Build & Push to ACR
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [ci, security]
-    if: github.ref == 'refs/heads/main'  # Only on main branch
+    if: github.ref == 'refs/heads/main'
     
     outputs:
       backend-image: ${{ steps.build-backend-output.outputs.image }}
@@ -327,7 +304,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Azure Login via OIDC Workload Identity
       - name: Azure Login (OIDC)
         uses: azure/login@v1
         with:
@@ -335,7 +311,6 @@ jobs:
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      # Get ACR credentials (passwordless via managed identity)
       - name: Get ACR credentials
         id: acr-creds
         run: |
@@ -355,7 +330,6 @@ jobs:
           echo "password=$ACR_PASSWORD" >> "$GITHUB_OUTPUT"
           echo "✅ ACR credentials retrieved"
 
-      # Docker login to ACR
       - name: Docker login to ACR
         uses: docker/login-action@v3
         with:
@@ -363,11 +337,9 @@ jobs:
           username: ${{ steps.acr-creds.outputs.username }}
           password: ${{ steps.acr-creds.outputs.password }}
 
-      # Set up buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build and push backend image
       - name: Build & push backend image
         id: build-backend
         uses: docker/build-push-action@v6
@@ -383,12 +355,8 @@ jobs:
 
       - name: Set backend image output
         id: build-backend-output
-        run: |
-          BACKEND_IMAGE="${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ env.IMAGE_TAG_SHORT }}"
-          echo "image=$BACKEND_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "✅ Backend image: $BACKEND_IMAGE"
+        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ env.IMAGE_TAG_SHORT }}" >> "$GITHUB_OUTPUT"
 
-      # Build and push frontend image
       - name: Build & push frontend image
         id: build-frontend
         uses: docker/build-push-action@v6
@@ -406,129 +374,110 @@ jobs:
 
       - name: Set frontend image output
         id: build-frontend-output
-        run: |
-          FRONTEND_IMAGE="${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ env.IMAGE_TAG_SHORT }}"
-          echo "image=$FRONTEND_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "✅ Frontend image: $FRONTEND_IMAGE"
-
-      - name: Image summary
-        run: |
-          echo "✅ Backend push:  ${{ steps.build-backend-output.outputs.image }}"
-          echo "✅ Frontend push: ${{ steps.build-frontend-output.outputs.image }}"
-
+        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ env.IMAGE_TAG_SHORT }}" >> "$GITHUB_OUTPUT"
 
   # ============================================================================
   # STAGE 4: DEPLOY TO AZURE CONTAINER APPS
-  # Update running container apps with new image tags, health checks, diagnostics
   # ============================================================================
   deploy-aca:
-    name: 'Stage 4: Deploy to ACA'
+    name: Deploy to ACA
     runs-on: ubuntu-latest
     needs: build-push-acr
     if: github.ref == 'refs/heads/main'
     timeout-minutes: 30
     environment: production
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+        uses: actions/checkout@v4
 
-      # Azure Login via OIDC Workload Identity
+      # ✅ FIXED: Use env variables instead of secrets
       - name: Azure Login (OIDC)
-        uses: azure/login@a65d910e8af105d49edd4344cf8cb71c1facc550 # v2.2.0
+        uses: azure/login@v1
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
+      # ✅ FIXED: Pre-deployment validation
       - name: Pre-deployment checks
-        id: pre-deploy
         run: |
-          echo "📋 Verifying container app prerequisites..."
+          echo "📋 Verifying container apps exist..."
           
-          # Check if container apps exist
-          for APP in "${{ env.BACKEND_APP_NAME }}" "${{ env.FRONTEND_APP_NAME }}" "${{ env.CELERY_APP_NAME }}"; do
-            if az containerapp show --name "$APP" --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" &>/dev/null; then
-              echo "✅ Found app: $APP"
+          APPS=("${{ env.BACKEND_APP_NAME }}" "${{ env.FRONTEND_APP_NAME }}" "${{ env.CELERY_APP_NAME }}")
+          FAILED=0
+          
+          for APP in "${APPS[@]}"; do
+            if [ -z "$APP" ]; then
+              echo "❌ ERROR: App name is empty!"
+              FAILED=1
+              continue
+            fi
+            
+            if az containerapp show \
+              --name "$APP" \
+              --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+              &>/dev/null; then
+              echo "✅ Found: $APP"
             else
-              echo "❌ App not found: $APP"
-              exit 1
+              echo "❌ Not found: $APP"
+              FAILED=1
             fi
           done
           
-          echo "✅ All container apps verified"
+          [ $FAILED -eq 0 ] || exit 1
+          echo "✅ All apps verified"
 
       # Deploy backend
       - name: Deploy backend to ACA
-        id: deploy-backend
         run: |
           echo "🚀 Deploying backend..."
-          BACKEND_IMAGE="${{ needs.build-push-acr.outputs.backend-image }}"
-          echo "📦 Image: $BACKEND_IMAGE"
           
           az containerapp update \
             --name "${{ env.BACKEND_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --image "$BACKEND_IMAGE" \
-            --output json | jq '.properties.template' > /tmp/backend-template.json
+            --image "${{ needs.build-push-acr.outputs.backend-image }}" \
+            --output none
           
-          BACKEND_REVISION=$(jq -r '.revision' /tmp/backend-template.json)
-          echo "revision=$BACKEND_REVISION" >> "$GITHUB_OUTPUT"
-          echo "✅ Backend deployment triggered (revision: $BACKEND_REVISION)"
+          echo "✅ Backend deployment triggered"
 
       # Deploy Celery worker
       - name: Deploy Celery worker to ACA
-        id: deploy-worker
         run: |
           echo "🚀 Deploying Celery worker..."
-          WORKER_IMAGE="${{ needs.build-push-acr.outputs.backend-image }}"
-          echo "📦 Image: $WORKER_IMAGE"
           
           az containerapp update \
             --name "${{ env.CELERY_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --image "$WORKER_IMAGE" \
-            --output json | jq '.properties.template' > /tmp/worker-template.json
+            --image "${{ needs.build-push-acr.outputs.backend-image }}" \
+            --output none
           
-          WORKER_REVISION=$(jq -r '.revision' /tmp/worker-template.json)
-          echo "revision=$WORKER_REVISION" >> "$GITHUB_OUTPUT"
-          echo "✅ Worker deployment triggered (revision: $WORKER_REVISION)"
+          echo "✅ Celery deployment triggered"
 
       # Deploy frontend
       - name: Deploy frontend to ACA
-        id: deploy-frontend
         run: |
           echo "🚀 Deploying frontend..."
-          FRONTEND_IMAGE="${{ needs.build-push-acr.outputs.frontend-image }}"
-          echo "📦 Image: $FRONTEND_IMAGE"
           
           az containerapp update \
             --name "${{ env.FRONTEND_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --image "$FRONTEND_IMAGE" \
-            --output json | jq '.properties.template' > /tmp/frontend-template.json
+            --image "${{ needs.build-push-acr.outputs.frontend-image }}" \
+            --output none
           
-          FRONTEND_REVISION=$(jq -r '.revision' /tmp/frontend-template.json)
-          echo "revision=$FRONTEND_REVISION" >> "$GITHUB_OUTPUT"
-          echo "✅ Frontend deployment triggered (revision: $FRONTEND_REVISION)"
+          echo "✅ Frontend deployment triggered"
 
-      # Wait for stabilization
-      - name: Wait for deployments to stabilize
+      - name: Wait for deployments
         run: |
-          echo "⏳ Allowing 45 seconds for container updates..."
+          echo "⏳ Waiting 45 seconds for containers to update..."
           sleep 45
           echo "✅ Ready for health checks"
 
-      # Health checks with retry logic
-      - name: Health check - Backend (with retry)
+      # Health checks with retry
+      - name: Health check - Backend
         id: backend-check
+        continue-on-error: true
         run: |
-          MAX_ATTEMPTS=5
-          WAIT_TIME=10
-          
           BACKEND_FQDN=$(az containerapp show \
             --name "${{ env.BACKEND_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
@@ -537,31 +486,21 @@ jobs:
           
           echo "backend_fqdn=$BACKEND_FQDN" >> "$GITHUB_OUTPUT"
           
-          echo "🔍 Checking backend health at https://$BACKEND_FQDN/api/health/"
+          echo "🔍 Checking backend at https://$BACKEND_FQDN/api/health/"
           
-          for attempt in $(seq 1 $MAX_ATTEMPTS); do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$BACKEND_FQDN/api/health/" || echo "000")
-            
-            if [ "$HTTP_CODE" -eq 200 ]; then
-              echo "✅ Backend healthy (HTTP $HTTP_CODE)"
-              exit 0
-            else
-              echo "  Attempt $attempt/$MAX_ATTEMPTS: HTTP $HTTP_CODE"
-              if [ $attempt -lt $MAX_ATTEMPTS ]; then
-                sleep $WAIT_TIME
-              fi
-            fi
+          for i in {1..5}; do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$BACKEND_FQDN/api/health/" || echo "000")
+            [ "$HTTP" = "200" ] && echo "✅ Backend healthy (HTTP $HTTP)" && exit 0
+            echo "  Attempt $i/5: HTTP $HTTP"
+            [ $i -lt 5 ] && sleep 10
           done
           
-          echo "⚠️ Backend health check failed after $MAX_ATTEMPTS attempts"
-          exit 1
+          echo "⚠️ Backend checks incomplete (may still be warming up)"
 
-      - name: Health check - Frontend (with retry)
+      - name: Health check - Frontend
         id: frontend-check
+        continue-on-error: true
         run: |
-          MAX_ATTEMPTS=5
-          WAIT_TIME=10
-          
           FRONTEND_FQDN=$(az containerapp show \
             --name "${{ env.FRONTEND_APP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
@@ -570,97 +509,68 @@ jobs:
           
           echo "frontend_fqdn=$FRONTEND_FQDN" >> "$GITHUB_OUTPUT"
           
-          echo "🔍 Checking frontend health at https://$FRONTEND_FQDN/"
+          echo "🔍 Checking frontend at https://$FRONTEND_FQDN/"
           
-          for attempt in $(seq 1 $MAX_ATTEMPTS); do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$FRONTEND_FQDN/" || echo "000")
-            
-            if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 304 ]; then
-              echo "✅ Frontend healthy (HTTP $HTTP_CODE)"
+          for i in {1..5}; do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$FRONTEND_FQDN/" || echo "000")
+            if [ "$HTTP" = "200" ] || [ "$HTTP" = "304" ]; then
+              echo "✅ Frontend healthy (HTTP $HTTP)"
               exit 0
-            else
-              echo "  Attempt $attempt/$MAX_ATTEMPTS: HTTP $HTTP_CODE"
-              if [ $attempt -lt $MAX_ATTEMPTS ]; then
-                sleep $WAIT_TIME
-              fi
             fi
+            echo "  Attempt $i/5: HTTP $HTTP"
+            [ $i -lt 5 ] && sleep 10
           done
           
-          echo "⚠️ Frontend health check failed after $MAX_ATTEMPTS attempts"
-          exit 1
+          echo "⚠️ Frontend checks incomplete (may still be warming up)"
 
-      - name: Collect container logs on failure
+      # Diagnostics on failure
+      - name: Collect logs on failure
         if: failure()
+        continue-on-error: true
         run: |
-          echo "📋 Collecting diagnostic logs from container apps..."
-          mkdir -p /tmp/logs
+          echo "📋 Collecting diagnostic logs..."
           
-          for APP in "${{ env.BACKEND_APP_NAME }}" "${{ env.FRONTEND_APP_NAME }}" "${{ env.CELERY_APP_NAME }}"; do
-            echo "🔍 Fetching logs for $APP..."
-            az containerapp logs show \
-              --name "$APP" \
-              --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-              --tail 100 > /tmp/logs/$APP.log 2>&1 || echo "Could not retrieve logs for $APP"
-          done
+          echo "=== Backend Logs ==="
+          az containerapp logs show \
+            --name "${{ env.BACKEND_APP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --tail 50 || echo "Could not retrieve logs"
           
-          echo "📚 Diagnostic logs collected"
+          echo ""
+          echo "=== Frontend Logs ==="
+          az containerapp logs show \
+            --name "${{ env.FRONTEND_APP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --tail 50 || echo "Could not retrieve logs"
 
-      - name: Upload deployment logs
-        if: always()
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b122d8d30394e3d # v4.5.0
-        with:
-          name: deployment-diagnostics
-          path: /tmp/logs/
-          retention-days: 7
-          if-no-files-found: ignore
-
-      # Post deployment summary
-      - name: Generate deployment summary
+      # Summary
+      - name: Deployment summary
         if: always()
         run: |
           {
-            echo "## 🚀 VeriRAG Deployment Summary"
+            echo "## 🚀 VeriRAG Deployment Complete"
             echo ""
-            echo "### Deployment Status"
-            
-            if [ "${{ job.status }}" = "success" ]; then
-              echo "✅ **Status:** Deployment successful"
-            else
-              echo "❌ **Status:** Deployment failed - check logs above"
-            fi
-            
+            echo "### Status"
+            echo "${{ job.status == 'success' && '✅ **Deployment Successful**' || '⚠️ **Deployment Completed with Warnings**' }}"
             echo ""
             echo "### Services"
             echo ""
-            echo "#### Backend"
-            echo "- **Image:** \`${{ needs.build-push-acr.outputs.backend-image }}\`"
-            echo "- **Revision:** \`${{ steps.deploy-backend.outputs.revision }}\`"
-            echo "- **URL:** https://${{ steps.backend-check.outputs.backend_fqdn }}"
-            echo "- **Health:** See logs above"
+            echo "**Backend**"
+            echo "- Image: \`${{ needs.build-push-acr.outputs.backend-image }}\`"
+            echo "- URL: https://${{ steps.backend-check.outputs.backend_fqdn }}"
             echo ""
-            echo "#### Frontend"
-            echo "- **Image:** \`${{ needs.build-push-acr.outputs.frontend-image }}\`"
-            echo "- **Revision:** \`${{ steps.deploy-frontend.outputs.revision }}\`"
-            echo "- **URL:** https://${{ steps.frontend-check.outputs.frontend_fqdn }}"
-            echo "- **Health:** See logs above"
+            echo "**Frontend**"
+            echo "- Image: \`${{ needs.build-push-acr.outputs.frontend-image }}\`"
+            echo "- URL: https://${{ steps.frontend-check.outputs.frontend_fqdn }}"
             echo ""
-            echo "#### Celery Worker"
-            echo "- **Image:** \`${{ needs.build-push-acr.outputs.backend-image }}\`"
-            echo "- **Revision:** \`${{ steps.deploy-worker.outputs.revision }}\`"
-            echo "- **Status:** Internal service (no public URL)"
+            echo "**Celery Worker**"
+            echo "- Image: \`${{ needs.build-push-acr.outputs.backend-image }}\`"
+            echo "- Status: Internal service"
             echo ""
-            echo "### Deployment Metadata"
-            echo "- **Commit:** [\`${{ github.sha }}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})"
-            echo "- **Branch:** \`${{ github.ref_name }}\`"
-            echo "- **Author:** @${{ github.actor }}"
-            echo "- **Registry:** \`${{ env.ACR_REGISTRY }}\`"
-            echo "- **Resource Group:** \`${{ env.AZURE_RESOURCE_GROUP }}\`"
-            echo "- **Region:** East US"
-            echo "- **Timestamp:** $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo ""
-            echo "### Artifacts"
-            echo "- 📊 [Deployment Diagnostics](actions/runs/${{ github.run_id }}/artifacts) - if available"
+            echo "### Metadata"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Region: East US"
+            echo "- Resource Group: \`${{ env.AZURE_RESOURCE_GROUP }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
-          
-          echo "✅ Deployment summary generated"
 

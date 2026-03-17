@@ -156,17 +156,15 @@ jobs:
           POSTGRES_PASSWORD: testpassword
           REDIS_URL: redis://localhost:6379/0
           OTEL_ENABLED: 'false'
+          PYTHONPATH: .
         run: |
           pip install pytest pytest-django pytest-cov
-          pytest tests/ \
-            --cov=ai_engine \
-            --cov=librarian \
-            --cov=verifier \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-report=term-summary \
-            --junitxml=junit.xml \
-            -v
+          
+          echo "📁 Backend structure:"
+          ls -la
+          
+          echo "🚀 Running tests..."
+          pytest . -v --maxfail=1 --disable-warnings
 
       - name: Upload backend test results
         if: always()

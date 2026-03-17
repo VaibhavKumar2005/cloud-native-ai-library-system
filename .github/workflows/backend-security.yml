@@ -37,7 +37,7 @@ jobs:
           docker build -t verirag-backend:${{ github.sha }} .
 
       - name: Run Trivy vulnerability scanner (Backend)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: verirag-backend:${{ github.sha }}
           format: 'sarif'
@@ -71,7 +71,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy on requirements.txt
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: 'fs'
           scan-ref: 'apps/backend/requirements.txt'
@@ -97,7 +97,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -119,3 +119,4 @@ jobs:
         with:
           sarif_file: 'bandit-results.sarif'
           category: 'bandit'
+

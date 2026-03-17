@@ -18,6 +18,7 @@ jobs:
   check-remediation:
     name: Verify Security Remediations
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
@@ -29,7 +30,7 @@ jobs:
         id: frontend_check
         run: |
           echo "Checking frontend security updates..."
-          if grep -q "nginx:stable-alpine" frontend/Dockerfile; then
+          if grep -q "nginx:stable-alpine" apps/frontend/Dockerfile; then
             echo "✅ Frontend using stable nginx"
             echo "frontend_ok=true" >> $GITHUB_OUTPUT
           else
@@ -37,7 +38,7 @@ jobs:
             echo "frontend_ok=false" >> $GITHUB_OUTPUT
           fi
           
-          if grep -q "apk upgrade" frontend/Dockerfile; then
+          if grep -q "apk upgrade" apps/frontend/Dockerfile; then
             echo "✅ Frontend has apk upgrade"
             echo "frontend_upgrade=true" >> $GITHUB_OUTPUT
           else
@@ -148,11 +149,35 @@ jobs:
           EOF
           cat REMEDIATION_STATUS.md
 
+      - name: Publish to GitHub Step Summary
+        if: always()
+        run: |
+          {
+            echo "## 🔒 Security Remediation Status"
+            echo ""
+            echo "| Component | Status |"
+            echo "|-----------|--------|"
+            echo "| Frontend nginx | ${{ steps.frontend_check.outputs.frontend_ok == 'true' && '✅ Pass' || '❌ Fail' }} |"
+            echo "| Frontend apk | ${{ steps.frontend_check.outputs.frontend_upgrade == 'true' && '✅ Pass' || '❌ Fail' }} |"
+            echo "| Backend apt-get | ${{ steps.backend_check.outputs.backend_upgrade == 'true' && '✅ Pass' || '❌ Fail' }} |"
+            echo "| Django >=5.1.7 | ${{ steps.python_check.outputs.django_ok == 'true' && '✅ Pass' || '❌ Fail' }} |"
+            echo "| gunicorn >=23.0.0 | ${{ steps.python_check.outputs.gunicorn_ok == 'true' && '✅ Pass' || '❌ Fail' }} |"
+            echo "| wheel >=0.46.0 | ${{ steps.python_check.outputs.wheel_ok == 'true' && '✅ Pass' || '⚠️  Check' }} |"
+            echo ""
+            echo "**Report Generated**: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "**Run ID**: ${{ github.run_id }}"
+            echo ""
+            echo "[📄 Full Report](./REMEDIATION_STATUS.md)"
+          } >> $GITHUB_STEP_SUMMARY
+
       - name: Upload Status Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: remediation-status
+          name: remediation-status-${{ github.run_id }}
           path: REMEDIATION_STATUS.md
+          retention-days: 90
+          overwrite: true
 
       - name: Comment on Issues
         if: failure()

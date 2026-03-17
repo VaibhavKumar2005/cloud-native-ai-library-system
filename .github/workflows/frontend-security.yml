@@ -37,7 +37,7 @@ jobs:
           docker build -t verirag-frontend:${{ github.sha }} .
 
       - name: Run Trivy vulnerability scanner (Frontend)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: verirag-frontend:${{ github.sha }}
           format: 'sarif'
@@ -71,7 +71,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy on package.json
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: 'fs'
           scan-ref: 'frontend/'
@@ -85,3 +85,4 @@ jobs:
         with:
           sarif_file: 'trivy-frontend-deps.sarif'
           category: 'trivy-frontend-deps'
+

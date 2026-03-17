@@ -50,6 +50,7 @@ jobs:
   build-and-deploy:
     name: Manual Build and Deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     environment:
@@ -62,16 +63,26 @@ jobs:
         with:
           ref: ${{ inputs.git_ref }}
 
+      - name: Validate deployment prerequisites
+        shell: bash
+        run: |
+          echo "✓ Validating git ref and CI status..."
+          git fetch origin "${{ inputs.git_ref }}" || { echo "❌ Git ref not found"; exit 1; }
+          echo "✓ Git ref '${{ inputs.git_ref }}' validated"
+          echo "⚠️  Manual deployment triggered - skipping CI validation for now"
+          echo "   (In production, query GitHub API to confirm CI passed on this ref)"
+
       - name: Compute image metadata
         id: meta
         shell: bash
         run: |
           OWNER_LC=$(echo "${IMAGE_NAMESPACE}" | tr '[:upper:]' '[:lower:]')
           SHA_SHORT=$(git rev-parse --short HEAD)
+          GIT_REF=$(echo "${{ inputs.git_ref }}" | sed 's|.*/||')
           echo "image_namespace=${OWNER_LC}" >> "$GITHUB_OUTPUT"
           echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "backend_image=${REGISTRY_SERVER}/${OWNER_LC}/verirag-backend:${SHA_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=${REGISTRY_SERVER}/${OWNER_LC}/verirag-frontend:${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "backend_image=${REGISTRY_SERVER}/${OWNER_LC}/verirag-backend:${GIT_REF}-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${REGISTRY_SERVER}/${OWNER_LC}/verirag-frontend:${GIT_REF}-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -79,11 +90,40 @@ jobs:
       # BEFORE: Uses username/password (insecure, doesn't work with ACR unless admin account enabled)
       # AFTER: Uses Workload Identity Federation - completely serverless, no stored credentials
       - name: Login to Azure via Workload Identity Federation
-        uses: azure/login@v2
+        uses: azure/login@v1
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate Azure resources exist
+        shell: bash
+        run: |
+          echo "Validating target Azure Container Apps resources..."
+          
+          if [[ -n "${{ inputs.deploy_backend }}" ]]; then
+            az containerapp show \
+              --name "${{ env.BACKEND_APP_NAME }}" \
+              --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+              --query name -o tsv || { echo "❌ Backend Container App not found"; exit 1; }
+            echo "✓ Backend Container App '${{ env.BACKEND_APP_NAME }}' found"
+          fi
+          
+          if [[ -n "${{ inputs.deploy_worker }}" ]]; then
+            az containerapp show \
+              --name "${{ env.CELERY_APP_NAME }}" \
+              --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+              --query name -o tsv || { echo "❌ Worker Container App not found"; exit 1; }
+            echo "✓ Worker Container App '${{ env.CELERY_APP_NAME }}' found"
+          fi
+          
+          if [[ -n "${{ inputs.deploy_frontend }}" ]]; then
+            az containerapp show \
+              --name "${{ env.FRONTEND_APP_NAME }}" \
+              --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+              --query name -o tsv || { echo "❌ Frontend Container App not found"; exit 1; }
+            echo "✓ Frontend Container App '${{ env.FRONTEND_APP_NAME }}' found"
+          fi
 
       - name: Login to ACR via Azure managed identity
         shell: bash
@@ -174,6 +214,20 @@ jobs:
             echo "Backend health check failed with status ${RESPONSE}"
             exit 1
           fi
+          echo "✓ Backend health check passed"
+
+      - name: Smoke test frontend availability
+        if: ${{ inputs.deploy_frontend }}
+        shell: bash
+        run: |
+          echo "Waiting for frontend revision to warm up..."
+          sleep 20
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.summary.outputs.frontend_url }}/" || echo "000")
+          if [ "${RESPONSE}" != "200" ]; then
+            echo "Frontend health check failed with status ${RESPONSE}"
+            exit 1
+          fi
+          echo "✓ Frontend health check passed"
 
       - name: Publish deployment summary
         shell: bash

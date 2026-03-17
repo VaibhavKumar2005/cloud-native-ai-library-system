@@ -202,7 +202,7 @@ jobs:
       # ─────────────────────────────────────────────────────────────────────
       
       - name: "🔐 Scan Backend Image - Vulnerabilities"
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.meta.outputs.backend_image }}
           scan-type: 'image'
@@ -213,7 +213,7 @@ jobs:
           timeout: '10m'
 
       - name: "🔐 Scan Backend - Configuration Issues"
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.meta.outputs.backend_image }}
           scan-type: 'config'
@@ -223,7 +223,7 @@ jobs:
           exit-code: '0'  # Config issues don't block, but we report them
 
       - name: "🔐 Scan Backend - Secrets & Credentials"
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.meta.outputs.backend_image }}
           scan-type: 'secret'
@@ -233,7 +233,7 @@ jobs:
           exit-code: '1'  # Always fail if secrets found
 
       - name: "🔐 Scan Frontend Image - Vulnerabilities"
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.meta.outputs.frontend_image }}
           scan-type: 'image'
@@ -244,7 +244,7 @@ jobs:
           timeout: '10m'
 
       - name: "🔐 Scan Frontend - Configuration Issues"
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.meta.outputs.frontend_image }}
           scan-type: 'config'
@@ -254,7 +254,7 @@ jobs:
           exit-code: '0'  # Config issues don't block, but we report them
 
       - name: "🔐 Scan Frontend - Secrets & Credentials"
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.meta.outputs.frontend_image }}
           scan-type: 'secret'
@@ -324,7 +324,7 @@ jobs:
           retention-days: 30
 
       - name: Login to Azure via Workload Identity Federation
-        uses: azure/login@v2
+        uses: azure/login@v1
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
@@ -392,9 +392,10 @@ jobs:
             echo "| Item | Value |"
             echo "|------|-------|"
             echo "| Commit | \`${{ steps.meta.outputs.sha_short }}\` |"
-            echo "| Backend Image | \`${{ steps.meta.outputs.backend_image }}\` |"
+            echo "| Backend Image | \`${{ steps.meta.outputs.backend_image }}\`  |"
             echo "| Frontend Image | \`${{ steps.meta.outputs.frontend_image }}\` |"
             echo "| Backend URL | ${{ steps.deployment.outputs.backend_url }} |"
             echo "| Frontend URL | ${{ steps.deployment.outputs.frontend_url }} |"
             echo "| Status | ✅ Deployed |"
           } >> "$GITHUB_STEP_SUMMARY"
+

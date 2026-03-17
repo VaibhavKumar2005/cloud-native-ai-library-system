@@ -46,8 +46,8 @@ jobs:
           exit-code: '1'  # Fail if CRITICAL or HIGH found
 
       - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-backend-results.sarif') != ''
         with:
           sarif_file: 'trivy-backend-results.sarif'
           category: 'trivy-backend'
@@ -80,8 +80,8 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Upload dependency scan results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-backend-deps.sarif') != ''
         with:
           sarif_file: 'trivy-backend-deps.sarif'
           category: 'trivy-backend-deps'
@@ -111,11 +111,15 @@ jobs:
       - name: Convert Bandit to SARIF
         run: |
           pip install bandit-sarif-formatter
-          python -m bandit_sarif_formatter bandit-report.json -o bandit-results.sarif || true
+          if [ -f bandit-report.json ]; then
+            python -m bandit_sarif_formatter bandit-report.json -o bandit-results.sarif || echo "⚠️  Bandit SARIF conversion failed"
+          else
+            echo "⚠️  No bandit report found"
+          fi
 
       - name: Upload Bandit results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('bandit-results.sarif') != ''
         with:
           sarif_file: 'bandit-results.sarif'
           category: 'bandit'

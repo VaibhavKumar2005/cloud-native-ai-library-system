@@ -268,43 +268,43 @@ jobs:
       # ─────────────────────────────────────────────────────────────────────
       
       - name: "📊 Upload Backend Vulnerability Report"
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-backend-vuln.sarif') != ''
         with:
           sarif_file: 'trivy-backend-vuln.sarif'
           category: 'trivy-backend-vulnerabilities'
 
       - name: "📊 Upload Backend Configuration Report"
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-backend-config.sarif') != ''
         with:
           sarif_file: 'trivy-backend-config.sarif'
           category: 'trivy-backend-config'
 
       - name: "📊 Upload Backend Secrets Report"
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-backend-secrets.sarif') != ''
         with:
           sarif_file: 'trivy-backend-secrets.sarif'
           category: 'trivy-backend-secrets'
 
       - name: "📊 Upload Frontend Vulnerability Report"
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-frontend-vuln.sarif') != ''
         with:
           sarif_file: 'trivy-frontend-vuln.sarif'
           category: 'trivy-frontend-vulnerabilities'
 
       - name: "📊 Upload Frontend Configuration Report"
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-frontend-config.sarif') != ''
         with:
           sarif_file: 'trivy-frontend-config.sarif'
           category: 'trivy-frontend-config'
 
       - name: "📊 Upload Frontend Secrets Report"
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-frontend-secrets.sarif') != ''
         with:
           sarif_file: 'trivy-frontend-secrets.sarif'
           category: 'trivy-frontend-secrets'

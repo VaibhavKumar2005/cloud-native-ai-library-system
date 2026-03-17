@@ -11,13 +11,15 @@ import re
 import time
 import hvac  # For HashiCorp Vault
 from functools import lru_cache
-from google import genai
-from openai import OpenAI  # Used for the Groq Fallback
+from openai import AzureOpenAI
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import SearchIndex
+from azure.identity import DefaultAzureCredential
 from prometheus_client import Counter, Histogram, Gauge
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_postgres import PGVector
+from langchain_openai import AzureOpenAIEmbeddings
 from ai_engine.models import Document
 
 # Import tracing utilities (graceful fallback if not configured)
@@ -93,7 +95,17 @@ DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
 DB_NAME = os.environ.get("POSTGRES_DB", "verirag_db")
 
 CONNECTION_STRING = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-COLLECTION_NAME = "rag_collection"
+
+# ============================================================================
+# AZURE CONFIGURATION
+# ============================================================================
+AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY")
+AZURE_OPENAI_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4-turbo")
+
+AZURE_SEARCH_ENDPOINT = os.environ.get("AZURE_SEARCH_ENDPOINT")
+AZURE_SEARCH_KEY = os.environ.get("AZURE_SEARCH_KEY")
+AZURE_SEARCH_INDEX = os.environ.get("AZURE_SEARCH_INDEX", "verirag-documents")
 
 # Verification thresholds
 FAITHFULNESS_THRESHOLD = 0.6  # Below this triggers fallback
@@ -243,30 +255,38 @@ def get_groq_api_key():
 @lru_cache(maxsize=1)
 def get_embedding_model():
     """
-    Creates embedding model with Vault-sourced API key.
+    Creates Azure OpenAI embedding model.
+    Uses Azure Key Vault or environment variables for credentials.
     Cached at module level to avoid recreating connection on every request.
     """
-    api_key = get_api_key_from_vault("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY is missing from Vault and environment!")
+    if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
+        raise ValueError("Azure OpenAI credentials not configured (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY)")
     
-    return GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=api_key
+    return AzureOpenAIEmbeddings(
+        model="text-embedding-3-small",
+        api_version="2024-02-15-preview",
+        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+        api_key=AZURE_OPENAI_KEY
     )
 
 
 @lru_cache(maxsize=1)
 def get_vector_store():
     """
-    Gets the PGVector store instance.
-    Cached at module level to reuse connection pools across queries.
+    Gets configured Azure AI Search client.
+    Cached at module level to reuse connection.
     """
-    return PGVector(
-        collection_name=COLLECTION_NAME,
-        connection_string=CONNECTION_STRING,
-        embedding_function=get_embedding_model(),
+    if not AZURE_SEARCH_ENDPOINT or not AZURE_SEARCH_KEY:
+        raise ValueError("Azure AI Search credentials not configured")
+    
+    # Use Key-based authentication for simplicity
+    # For production, consider using DefaultAzureCredential
+    search_client = SearchClient(
+        endpoint=AZURE_SEARCH_ENDPOINT,
+        index_name=AZURE_SEARCH_INDEX,
+        credential=AZURE_SEARCH_KEY
     )
+    return search_client
 
 
 # ============================================================================
@@ -457,47 +477,63 @@ def process_pdf_to_vector_db(file_path, user_id=None):
 # ============================================================================
 # 2. LLM ROUTER WITH AUTOMATIC FAILOVER
 # ============================================================================
-def call_gemini(prompt, api_key, _retries=2):
-    """Primary LLM: Google Gemini with JSON mode. Retries on 429 rate-limit."""
+def call_gemini(prompt, _retries=2):
+    """
+    Primary LLM: Azure OpenAI GPT-4 with JSON mode. Retries on rate limits.
+    """
     with trace_context(
-        "rag.provider.gemini.generate",
+        "rag.provider.azure_openai.generate",
         {
-            "gen_ai.system": "google_genai",
-            "gen_ai.request.model": "gemini-2.0-flash",
-            "rag.provider": "gemini",
+            "gen_ai.system": "azure_openai",
+            "gen_ai.request.model": AZURE_OPENAI_MODEL,
+            "rag.provider": "azure_openai",
             "rag.provider.max_retries": _retries,
         },
     ):
-        client = genai.Client(api_key=api_key)
-        generation_config = {
-            "temperature": 0.1,  # Low temperature for factual responses
-            "response_mime_type": "application/json"
-        }
+        if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
+            raise ValueError("Azure OpenAI credentials not configured")
+
+        client = AzureOpenAI(
+            api_key=AZURE_OPENAI_KEY,
+            api_version="2024-02-15-preview",
+            azure_endpoint=AZURE_OPENAI_ENDPOINT
+        )
+        
         for attempt in range(_retries + 1):
             try:
                 add_span_attributes({"rag.provider.attempt": attempt + 1})
-                response = client.models.generate_content(
-                    model='gemini-2.0-flash',
-                    contents=prompt,
-                    config=generation_config
+                
+                response = client.chat.completions.create(
+                    model=AZURE_OPENAI_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are VeriRag, a strictly faithful AI Librarian. Always output valid JSON with the exact schema requested."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.1,  # Low temperature for factual responses
+                    response_format={"type": "json_object"}
                 )
+                
                 record_event(
                     "rag.provider.success",
-                    {"rag.provider": "gemini", "rag.provider.attempt": attempt + 1},
+                    {"rag.provider": "azure_openai", "rag.provider.attempt": attempt + 1},
                 )
-                return response.text
+                return response.choices[0].message.content
+                
             except Exception as e:
                 record_event(
                     "rag.provider.error",
                     {
-                        "rag.provider": "gemini",
+                        "rag.provider": "azure_openai",
                         "rag.provider.attempt": attempt + 1,
                         "error.message": str(e),
                     },
                 )
-                if '429' in str(e) and attempt < _retries:
+                if ('429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e)) and attempt < _retries:
                     wait = 5 * (attempt + 1)
-                    logger.warning(f"⏳ Gemini 429 — retrying in {wait}s (attempt {attempt+1}/{_retries})")
+                    logger.warning(f"⏳ Azure OpenAI rate limited — retrying in {wait}s (attempt {attempt+1}/{_retries})")
                     time.sleep(wait)
                 else:
                     raise
@@ -538,17 +574,18 @@ def call_groq_llama(prompt):
         return response.choices[0].message.content
 
 
-def call_llm_with_fallback(prompt, api_key):
+def call_llm_with_fallback(prompt):
     """
-    Intelligent LLM router: Tries Gemini first, automatically fails over to Groq.
+    Intelligent LLM router: Tries Azure OpenAI first, automatically fails over to Groq.
     Updates Prometheus metrics on failover.
+    Azure OpenAI uses AZURE_OPENAI_KEY, Groq uses GROQ_API_KEY from Vault.
     """
-    with trace_context("rag.provider.router", {"rag.provider.primary": "gemini"}):
+    with trace_context("rag.provider.router", {"rag.provider.primary": "azure_openai"}):
         try:
-            ACTIVE_MODEL.set(1)  # Gemini
-            response = call_gemini(prompt, api_key)
-            add_span_attributes({"rag.provider.selected": "gemini"})
-            return response, "gemini"
+            ACTIVE_MODEL.set(1)  # Azure OpenAI
+            response = call_gemini(prompt)
+            add_span_attributes({"rag.provider.selected": "azure_openai"})
+            return response, "azure_openai"
 
         except Exception as primary_error:
             LLM_FALLBACKS.inc()
@@ -562,19 +599,19 @@ def call_llm_with_fallback(prompt, api_key):
             record_event(
                 "rag.provider.failover",
                 {
-                    "rag.provider.from": "gemini",
+                    "rag.provider.from": "azure_openai",
                     "rag.provider.to": "groq",
                     "error.message": str(primary_error),
                 },
             )
-            logger.warning(f"⚠️ Gemini failed: {primary_error}. Switching to Groq/Llama-3...")
+            logger.warning(f"⚠️ Azure OpenAI failed: {primary_error}. Switching to Groq/Llama-3...")
 
             try:
                 response = call_groq_llama(prompt)
                 return response, "groq"
 
             except Exception as backup_error:
-                logger.error(f"❌ Both LLMs failed. Gemini: {primary_error}, Groq: {backup_error}")
+                logger.error(f"❌ Both LLMs failed. Azure OpenAI: {primary_error}, Groq: {backup_error}")
                 record_event(
                     "rag.provider.unavailable",
                     {
@@ -585,7 +622,7 @@ def call_llm_with_fallback(prompt, api_key):
                 return json.dumps({
                     "answer": "System Notice: All AI providers are currently unavailable. Please try again later.",
                     "faithfulness_score": 0.0,
-                    "explanation": "Both primary (Gemini) and backup (Groq) LLMs failed.",
+                    "explanation": "Both primary (Azure OpenAI) and backup (Groq) LLMs failed.",
                     "source_citation": "System Error",
                     "verification_passed": False
                 }), "error"
@@ -807,27 +844,6 @@ def get_verified_answer(query, user_id, request_context=None):
         record_event("rag.query.pipeline.started", {"rag.query.id": query_id})
 
         try:
-            with trace_context("rag.secrets.lookup", {"rag.secret.key": "GOOGLE_API_KEY"}):
-                api_key = get_api_key_from_vault("GOOGLE_API_KEY")
-            if not api_key:
-                return {
-                    "answer": "System Error: Unable to retrieve API credentials from Vault",
-                    "faithfulness_score": 0.0,
-                    "explanation": "Vault connection failed or GOOGLE_API_KEY not found",
-                    "source_citation": "System Error",
-                    "evidence_items": [],
-                    "verification_passed": False,
-                    "model_used": "none",
-                    "context_chunks_used": 0,
-                    "evaluation": {
-                        "faithfulness": 0.0,
-                        "answer_relevancy": 0.0,
-                        "context_precision": 0.0,
-                        "context_recall": 0.0,
-                        "combined_score": 0.0,
-                    }
-                }
-
             with trace_context(
                 "rag.retrieval.vector_search",
                 {
@@ -915,7 +931,7 @@ Respond with this exact JSON structure:
                     "rag.prompt.length": len(generation_prompt),
                 },
             ):
-                response_text, model_used = call_llm_with_fallback(generation_prompt, api_key)
+                response_text, model_used = call_llm_with_fallback(generation_prompt)
                 add_span_attributes({"rag.response.model_used": model_used})
 
             try:

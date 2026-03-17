@@ -6,13 +6,13 @@ on:
       - main
       - develop
     paths:
-      - 'frontend/**'
+      - 'apps/frontend/**'
       - '.github/workflows/frontend-security.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'frontend/**'
+      - 'apps/frontend/**'
   schedule:
     - cron: '0 2 * * 0'  # Weekly scan on Sundays at 2 AM UTC
 
@@ -33,7 +33,7 @@ jobs:
 
       - name: Build Frontend Docker image
         run: |
-          cd frontend
+          cd apps/frontend
           docker build -t verirag-frontend:${{ github.sha }} .
 
       - name: Run Trivy vulnerability scanner (Frontend)
@@ -74,7 +74,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: 'fs'
-          scan-ref: 'frontend/'
+          scan-ref: 'apps/frontend/'
           format: 'sarif'
           output: 'trivy-frontend-deps.sarif'
           severity: 'CRITICAL,HIGH'

@@ -177,7 +177,6 @@ jobs:
           name: remediation-status-${{ github.run_id }}
           path: REMEDIATION_STATUS.md
           retention-days: 90
-          overwrite: true
 
       - name: Comment on Issues
         if: failure()

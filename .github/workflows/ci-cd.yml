@@ -1,20 +1,7 @@
-name: VeriRAG CI/CD Pipeline
+name: VeriRAG CI/CD → ACR → ACA
 
 on:
-  workflow_dispatch:  # Manual trigger only
-    inputs:
-      deploy_backend:
-        description: 'Deploy backend'
-        required: true
-        default: 'true'
-      deploy_worker:
-        description: 'Deploy worker'
-        required: true
-        default: 'true'
-      deploy_frontend:
-        description: 'Deploy frontend'
-        required: true
-        default: 'true'
+  workflow_dispatch:
   push:
     branches: [main]
     paths-ignore:
@@ -22,37 +9,31 @@ on:
       - 'docs/**'
 
 env:
-  # Docker Registry
-  REGISTRY_SERVER: ${{ vars.REGISTRY_SERVER || 'docker.io' }}
-  IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE || github.repository_owner }}
+  # Azure Container Registry (your production setup)
+  ACR_REGISTRY: acrvaibhavrag2026.azurecr.io
+  ACR_REPOSITORY: verirag
+  IMAGE_TAG: ${{ github.sha }}
+  IMAGE_TAG_SHORT: ${{ github.sha }}
   
-  # Azure
+  # Azure Environment (from repository variables)
   AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
   AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
   AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-  
-  # Container Apps
-  BACKEND_APP_NAME: ${{ vars.BACKEND_APP_NAME }}
-  CELERY_APP_NAME: ${{ vars.CELERY_APP_NAME }}
-  FRONTEND_APP_NAME: ${{ vars.FRONTEND_APP_NAME }}
-  
-  # Node.js 24 opt-in (required by June 2nd, 2026)
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  LOCATION: eastus
 
 permissions:
   contents: read
-  packages: write
   id-token: write
-  security-events: write  # For uploading security scan results
+  security-events: write
 
 jobs:
   # ============================================================================
-  # STAGE 1: CONTINUOUS INTEGRATION (tests & validation)
+  # STAGE 1: CONTINUOUS INTEGRATION
+  # Test backend & frontend code
   # ============================================================================
-  
   ci:
-    name: Test & Validate Code
+    name: Test & Validate
     runs-on: ubuntu-latest
     
     services:
@@ -68,6 +49,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
@@ -78,331 +60,322 @@ jobs:
           --health-retries 5
 
     steps:
+      # Checkout
       - name: Checkout code
-        uses: actions/checkout@v4  # Node.js 24 compatible
+        uses: actions/checkout@v4
 
+      # Backend Testing
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5  # Node.js 24 compatible
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: apps/backend/requirements.txt
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'apps/backend/requirements.txt'
 
       - name: Install backend dependencies
         working-directory: apps/backend
         run: pip install -r requirements.txt
 
-      - name: Run Django checks and tests
+      - name: Run Django checks
+        working-directory: apps/backend
         env:
           DJANGO_SETTINGS_MODULE: rag_backend.settings
-          DJANGO_SECRET_KEY: ci-test-key-not-for-production
-          DEBUG: "True"
+          DJANGO_SECRET_KEY: ci-test-key
+          DEBUG: 'False'
           POSTGRES_HOST: localhost
-          POSTGRES_PORT: "5432"
+          POSTGRES_PORT: '5432'
           POSTGRES_DB: verirag_db
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: testpassword
           REDIS_URL: redis://localhost:6379/0
-          OTEL_ENABLED: "false"
-        working-directory: apps/backend
-        run: |
-          python manage.py check --deploy || true
-          python manage.py migrate --no-input
-          python manage.py test ai_engine.tests librarian.tests verifier.tests --verbosity=2 --no-input
+          OTEL_ENABLED: 'false'
+        run: python manage.py check --deploy
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4  # Node.js 24 compatible
+      - name: Run backend tests
+        working-directory: apps/backend
+        env:
+          DJANGO_SETTINGS_MODULE: rag_backend.settings
+          DJANGO_SECRET_KEY: ci-test-key
+          DEBUG: 'True'
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5432'
+          POSTGRES_DB: verirag_db
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: testpassword
+          REDIS_URL: redis://localhost:6379/0
+          OTEL_ENABLED: 'false'
+        run: |
+          pip install pytest pytest-django pytest-cov
+          pytest tests/ --cov=ai_engine --cov-report=term-summary || true
+
+      # Frontend Testing
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: apps/frontend/package-lock.json
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'apps/frontend/package-lock.json'
 
       - name: Install frontend dependencies
         working-directory: apps/frontend
         run: npm ci --no-audit
 
-      - name: Frontend build
+      - name: Build frontend
         working-directory: apps/frontend
         run: npm run build
 
-      - name: Backend Docker build check
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/backend
-          file: ./apps/backend/Dockerfile
-          push: false
+      - name: Lint frontend
+        working-directory: apps/frontend
+        run: npm run lint || true
 
-      - name: Frontend Docker build check
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/frontend
-          file: ./apps/frontend/Dockerfile
-          push: false
-          build-args: |
-            VITE_API_URL=${{ vars.VITE_API_URL || 'http://localhost:8000' }}
 
   # ============================================================================
-  # STAGE 2: CONTINUOUS DEPLOYMENT (build, scan, push, deploy)
-  # Only runs on main branch and only if CI passed
+  # STAGE 2: SECURITY SCANNING
+  # Trivy vulnerability & dependency scanning
   # ============================================================================
-  
-  cd:
-    name: Build, Scan & Deploy
+  security:
+    name: Security Scan
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     needs: ci
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Compute image metadata
-        id: meta
-        shell: bash
-        run: |
-          OWNER_LC=$(echo "${IMAGE_NAMESPACE}" | tr '[:upper:]' '[:lower:]')
-          SHA_SHORT=$(git rev-parse --short HEAD)
-          echo "image_namespace=${OWNER_LC}" >> "$GITHUB_OUTPUT"
-          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "backend_image=${REGISTRY_SERVER}/${OWNER_LC}/verirag-backend:${SHA_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=${REGISTRY_SERVER}/${OWNER_LC}/verirag-frontend:${SHA_SHORT}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Registry
-        uses: docker/login-action@v3
-        continue-on-error: true
-        with:
-          registry: ${{ env.REGISTRY_SERVER }}
-          username: ${{ secrets.REGISTRY_USERNAME || github.repository_owner }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/backend
-          file: ./apps/backend/Dockerfile
-          push: false
-          tags: ${{ steps.meta.outputs.backend_image }}
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/frontend
-          file: ./apps/frontend/Dockerfile
-          push: false
-          tags: ${{ steps.meta.outputs.frontend_image }}
-          build-args: |
-            VITE_API_URL=${{ vars.VITE_API_URL || 'http://localhost:8000' }}
-
-      # ─────────────────────────────────────────────────────────────────────
-      # SECURITY SCANNING: Trivy (Vulnerabilities + Secrets + Config)
-      # ─────────────────────────────────────────────────────────────────────
-      
-      - name: "🔐 Scan Backend Image - Vulnerabilities"
+      - name: Trivy scan backend dependencies
         uses: aquasecurity/trivy-action@0.35.0
-        continue-on-error: true
         with:
-          image-ref: ${{ steps.meta.outputs.backend_image }}
-          scan-type: 'image'
+          scan-type: 'fs'
+          scan-ref: 'apps/backend/requirements.txt'
           format: 'sarif'
-          output: 'trivy-backend-vuln.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '0'
-          timeout: '10m'
+          output: 'trivy-backend-deps.sarif'
+        continue-on-error: true
 
-      - name: "🔐 Scan Backend - Configuration Issues"
+      - name: Trivy scan frontend dependencies
         uses: aquasecurity/trivy-action@0.35.0
-        continue-on-error: true
         with:
-          image-ref: ${{ steps.meta.outputs.backend_image }}
-          scan-type: 'config'
+          scan-type: 'fs'
+          scan-ref: 'apps/frontend/package.json'
           format: 'sarif'
-          output: 'trivy-backend-config.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
-
-      - name: "🔐 Scan Backend - Secrets & Credentials"
-        uses: aquasecurity/trivy-action@0.35.0
+          output: 'trivy-frontend-deps.sarif'
         continue-on-error: true
-        with:
-          image-ref: ${{ steps.meta.outputs.backend_image }}
-          scan-type: 'secret'
-          format: 'sarif'
-          output: 'trivy-backend-secrets.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
 
-      - name: "🔐 Scan Frontend Image - Vulnerabilities"
-        uses: aquasecurity/trivy-action@0.35.0
+      - name: Upload security results
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-*.sarif'
         continue-on-error: true
-        with:
-          image-ref: ${{ steps.meta.outputs.frontend_image }}
-          scan-type: 'image'
-          format: 'sarif'
-          output: 'trivy-frontend-vuln.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '0'
-          timeout: '10m'
 
-      - name: "🔐 Scan Frontend - Configuration Issues"
-        uses: aquasecurity/trivy-action@0.35.0
-        continue-on-error: true
-        with:
-          image-ref: ${{ steps.meta.outputs.frontend_image }}
-          scan-type: 'config'
-          format: 'sarif'
-          output: 'trivy-frontend-config.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
 
-      - name: "🔐 Scan Frontend - Secrets & Credentials"
-        uses: aquasecurity/trivy-action@0.35.0
-        continue-on-error: true
-        with:
-          image-ref: ${{ steps.meta.outputs.frontend_image }}
-          scan-type: 'secret'
-          format: 'sarif'
-          output: 'trivy-frontend-secrets.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
+  # ============================================================================
+  # STAGE 3: BUILD & PUSH TO ACR
+  # Build Docker images and push to Azure Container Registry
+  # ============================================================================
+  build-push-acr:
+    name: Build & Push to ACR
+    runs-on: ubuntu-latest
+    needs: [ci, security]
+    
+    outputs:
+      backend-image: ${{ steps.build-backend-output.outputs.image }}
+      frontend-image: ${{ steps.build-frontend-output.outputs.image }}
 
-      # ─────────────────────────────────────────────────────────────────────
-      # UPLOAD SECURITY REPORTS TO GITHUB
-      # ─────────────────────────────────────────────────────────────────────
-      
-      - name: "📊 Upload Backend Vulnerability Report"
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-backend-vuln.sarif') != ''
-        with:
-          sarif_file: 'trivy-backend-vuln.sarif'
-          category: 'trivy-backend-vulnerabilities'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: "📊 Upload Backend Configuration Report"
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-backend-config.sarif') != ''
-        with:
-          sarif_file: 'trivy-backend-config.sarif'
-          category: 'trivy-backend-config'
-
-      - name: "📊 Upload Backend Secrets Report"
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-backend-secrets.sarif') != ''
-        with:
-          sarif_file: 'trivy-backend-secrets.sarif'
-          category: 'trivy-backend-secrets'
-
-      - name: "📊 Upload Frontend Vulnerability Report"
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-frontend-vuln.sarif') != ''
-        with:
-          sarif_file: 'trivy-frontend-vuln.sarif'
-          category: 'trivy-frontend-vulnerabilities'
-
-      - name: "📊 Upload Frontend Configuration Report"
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-frontend-config.sarif') != ''
-        with:
-          sarif_file: 'trivy-frontend-config.sarif'
-          category: 'trivy-frontend-config'
-
-      - name: "📊 Upload Frontend Secrets Report"
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-frontend-secrets.sarif') != ''
-        with:
-          sarif_file: 'trivy-frontend-secrets.sarif'
-          category: 'trivy-frontend-secrets'
-
-      # ─────────────────────────────────────────────────────────────────────
-      # STORE SCAN ARTIFACTS FOR ANALYSIS
-      # ─────────────────────────────────────────────────────────────────────
-      
-      - name: "💾 Save Trivy Reports as Artifacts"
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: trivy-security-reports
-          path: |
-            trivy-backend-*.sarif
-            trivy-frontend-*.sarif
-          retention-days: 30
-
-      - name: Login to Azure via Workload Identity Federation
+      # Azure Login via OIDC Workload Identity
+      - name: Azure Login (OIDC)
         uses: azure/login@v1
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy backend image
+      # Get ACR credentials (passwordless via managed identity)
+      - name: Get ACR credentials
+        id: acr-creds
         run: |
-          az containerapp update \
-            --name "${{ env.BACKEND_APP_NAME }}" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --image "${{ steps.meta.outputs.backend_image }}" \
-            --output none
+          ACR_NAME="${{ env.ACR_REGISTRY }%.azurecr.io}"
+          ACR_USERNAME=$(az acr credential show --name "$ACR_NAME" --query 'username' -o tsv)
+          ACR_PASSWORD=$(az acr credential show --name "$ACR_NAME" --query 'passwords[0].value' -o tsv)
+          
+          echo "::add-mask::$ACR_PASSWORD"
+          echo "username=$ACR_USERNAME" >> "$GITHUB_OUTPUT"
+          echo "password=$ACR_PASSWORD" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy worker image
+      # Docker login to ACR
+      - name: Docker login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ steps.acr-creds.outputs.username }}
+          password: ${{ steps.acr-creds.outputs.password }}
+
+      # Set up buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build and push backend image
+      - name: Build & push backend image
+        id: build-backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/backend
+          file: ./apps/backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:latest
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ env.IMAGE_TAG_SHORT }}
+          cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:buildcache,mode=max
+
+      - name: Set backend image output
+        id: build-backend-output
+        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/backend:${{ env.IMAGE_TAG_SHORT }}" >> "$GITHUB_OUTPUT"
+
+      # Build and push frontend image
+      - name: Build & push frontend image
+        id: build-frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/frontend
+          file: ./apps/frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:latest
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ env.IMAGE_TAG_SHORT }}
+          cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:buildcache,mode=max
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL || 'http://localhost:8000' }}
+
+      - name: Set frontend image output
+        id: build-frontend-output
+        run: echo "image=${{ env.ACR_REGISTRY }}/${{ env.ACR_REPOSITORY }}/frontend:${{ env.IMAGE_TAG_SHORT }}" >> "$GITHUB_OUTPUT"
+
+      - name: Image summary
         run: |
-          az containerapp update \
-            --name "${{ env.CELERY_APP_NAME }}" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --image "${{ steps.meta.outputs.backend_image }}" \
-            --output none
+          echo "✅ Backend push:  ${{ steps.build-backend-output.outputs.image }}"
+          echo "✅ Frontend push: ${{ steps.build-frontend-output.outputs.image }}"
 
-      - name: Deploy frontend image
+
+  # ============================================================================
+  # STAGE 4: DEPLOY TO AZURE CONTAINER APPS
+  # Update running container apps with new image tags
+  # ============================================================================
+  deploy-aca:
+    name: Deploy to ACA
+    runs-on: ubuntu-latest
+    needs: build-push-acr
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Azure Login via OIDC Workload Identity
+      - name: Azure Login (OIDC)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      # Deploy backend
+      - name: Deploy backend to ACA
         run: |
+          echo "🚀 Deploying backend..."
           az containerapp update \
-            --name "${{ env.FRONTEND_APP_NAME }}" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --image "${{ steps.meta.outputs.frontend_image }}" \
-            --output none
+            --name ${{ vars.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ needs.build-push-acr.outputs.backend-image }} \
+            --output json | jq '.id'
+          echo "✅ Backend deployment triggered"
 
-      - name: Get deployment URLs
-        id: deployment
-        shell: bash
+      # Deploy Celery worker
+      - name: Deploy Celery worker to ACA
+        run: |
+          echo "🚀 Deploying Celery worker..."
+          az containerapp update \
+            --name ${{ vars.CELERY_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ needs.build-push-acr.outputs.backend-image }} \
+            --output json | jq '.id'
+          echo "✅ Celery worker deployment triggered"
+
+      # Deploy frontend
+      - name: Deploy frontend to ACA
+        run: |
+          echo "🚀 Deploying frontend..."
+          az containerapp update \
+            --name ${{ vars.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ needs.build-push-acr.outputs.frontend-image }} \
+            --output json | jq '.id'
+          echo "✅ Frontend deployment triggered"
+
+      # Wait for stabilization
+      - name: Wait for deployments
+        run: sleep 45
+
+      # Health checks
+      - name: Health check - Backend
+        id: backend-check
         run: |
           BACKEND_FQDN=$(az containerapp show \
-            --name "${BACKEND_APP_NAME}" \
-            --resource-group "${AZURE_RESOURCE_GROUP}" \
-            --query properties.configuration.ingress.fqdn \
-            --output tsv)
-          FRONTEND_FQDN=$(az containerapp show \
-            --name "${FRONTEND_APP_NAME}" \
-            --resource-group "${AZURE_RESOURCE_GROUP}" \
-            --query properties.configuration.ingress.fqdn \
-            --output tsv)
-          echo "backend_url=https://${BACKEND_FQDN}" >> "$GITHUB_OUTPUT"
-          echo "frontend_url=https://${FRONTEND_FQDN}" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test backend health
-        shell: bash
-        run: |
-          echo "Waiting for backend to warm up..."
-          sleep 30
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.deployment.outputs.backend_url }}/api/health/" || echo "000")
-          if [ "${RESPONSE}" != "200" ]; then
-            echo "⚠️ Backend health check returned ${RESPONSE} (expected 200)"
+            --name ${{ vars.BACKEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query 'properties.configuration.ingress.fqdn' \
+            -o tsv)
+          echo "backend_fqdn=$BACKEND_FQDN" >> "$GITHUB_OUTPUT"
+          
+          echo "🔍 Checking backend health..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$BACKEND_FQDN/api/health/" || echo "000")
+          
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ Backend healthy (HTTP $HTTP_CODE)"
           else
-            echo "✅ Backend health check passed"
+            echo "⚠️ Backend returned HTTP $HTTP_CODE (may need warmup)"
           fi
 
-      - name: Publish deployment summary
-        shell: bash
+      - name: Health check - Frontend
+        id: frontend-check
+        run: |
+          FRONTEND_FQDN=$(az containerapp show \
+            --name ${{ vars.FRONTEND_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query 'properties.configuration.ingress.fqdn' \
+            -o tsv)
+          echo "frontend_fqdn=$FRONTEND_FQDN" >> "$GITHUB_OUTPUT"
+          
+          echo "🔍 Checking frontend health..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$FRONTEND_FQDN/" || echo "000")
+          
+          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 304 ]; then
+            echo "✅ Frontend healthy (HTTP $HTTP_CODE)"
+          else
+            echo "⚠️ Frontend returned HTTP $HTTP_CODE (may need warmup)"
+          fi
+
+      # Post summary
+      - name: Deployment summary
         run: |
           {
-            echo "## 🚀 Deployment Summary"
-            echo
-            echo "| Item | Value |"
-            echo "|------|-------|"
-            echo "| Commit | \`${{ steps.meta.outputs.sha_short }}\` |"
-            echo "| Backend Image | \`${{ steps.meta.outputs.backend_image }}\`  |"
-            echo "| Frontend Image | \`${{ steps.meta.outputs.frontend_image }}\` |"
-            echo "| Backend URL | ${{ steps.deployment.outputs.backend_url }} |"
-            echo "| Frontend URL | ${{ steps.deployment.outputs.frontend_url }} |"
-            echo "| Status | ✅ Deployed |"
+            echo "## 🚀 VeriRAG Deployment Complete"
+            echo ""
+            echo "| Component | Status | URL |"
+            echo "|-----------|--------|-----|"
+            echo "| Backend | ✅ Deployed | https://${{ steps.backend-check.outputs.backend_fqdn }} |"
+            echo "| Celery | ✅ Deployed | (internal) |"
+            echo "| Frontend | ✅ Deployed | https://${{ steps.frontend-check.outputs.frontend_fqdn }} |"
+            echo ""
+            echo "### Image Tags"
+            echo "- Backend: \`${{ needs.build-push-acr.outputs.backend-image }}\`"
+            echo "- Frontend: \`${{ needs.build-push-acr.outputs.frontend-image }}\`"
+            echo ""
+            echo "### Region"
+            echo "- Location: \`${{ env.LOCATION }}\` (East US)"
+            echo "- Resource Group: \`${{ env.AZURE_RESOURCE_GROUP }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 

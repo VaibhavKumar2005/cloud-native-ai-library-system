@@ -196,7 +196,7 @@ jobs:
       - name: Get ACR credentials
         id: acr-creds
         run: |
-          ACR_NAME="${{ env.ACR_REGISTRY }%.azurecr.io}"
+          ACR_NAME="${ACR_REGISTRY%.azurecr.io}"
           ACR_USERNAME=$(az acr credential show --name "$ACR_NAME" --query 'username' -o tsv)
           ACR_PASSWORD=$(az acr credential show --name "$ACR_NAME" --query 'passwords[0].value' -o tsv)
           

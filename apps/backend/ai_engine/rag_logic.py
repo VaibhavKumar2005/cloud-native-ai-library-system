@@ -12,15 +12,26 @@ import time
 import hvac  # For HashiCorp Vault
 from functools import lru_cache
 from openai import AzureOpenAI, OpenAI
-from azure.search.documents import SearchClient
-from azure.search.documents.indexes import SearchIndexClient
-from azure.search.documents.indexes.models import SearchIndex
-from azure.identity import DefaultAzureCredential
 from prometheus_client import Counter, Histogram, Gauge
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import AzureOpenAIEmbeddings
 from ai_engine.models import Document
+
+# Azure Search - optional for local dev, required for cloud
+try:
+    from azure.search.documents import SearchClient
+    from azure.search.documents.indexes import SearchIndexClient
+    from azure.search.documents.indexes.models import SearchIndex
+    from azure.identity import DefaultAzureCredential
+    AZURE_SEARCH_AVAILABLE = True
+except ImportError:
+    SearchClient = None
+    SearchIndexClient = None
+    SearchIndex = None
+    DefaultAzureCredential = None
+    AZURE_SEARCH_AVAILABLE = False
+    logging.warning("Azure Search not available - vector search will be disabled")
 
 # Import tracing utilities (graceful fallback if not configured)
 try:

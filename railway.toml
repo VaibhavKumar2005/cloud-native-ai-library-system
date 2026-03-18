@@ -1,0 +1,23 @@
+[build]
+builder = "dockerfile"
+context = "."
+
+[[services]]
+name = "backend"
+dockerfile = "apps/backend/Dockerfile"
+startCommand = "gunicorn rag_backend.wsgi:application --bind 0.0.0.0:8000"
+rootDirectory = "apps/backend"
+
+[[services]]
+name = "frontend"
+dockerfile = "apps/frontend/Dockerfile"
+startCommand = "npm run preview"
+rootDirectory = "apps/frontend"
+
+[[services.volumes]]
+source = "postgres_data"
+target = "/var/lib/postgresql/data"
+
+[[services.volumes]]
+source = "redis_data"
+target = "/data"

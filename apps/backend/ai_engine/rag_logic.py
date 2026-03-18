@@ -11,7 +11,7 @@ import re
 import time
 import hvac  # For HashiCorp Vault
 from functools import lru_cache
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import SearchIndex

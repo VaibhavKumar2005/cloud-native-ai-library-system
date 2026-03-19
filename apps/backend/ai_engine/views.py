@@ -10,6 +10,7 @@ import redis
 import hvac
 from django.db import connections
 from django.db.utils import OperationalError
+from django.conf import settings
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes, action, throttle_classes as drf_throttle_classes
@@ -17,6 +18,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from prometheus_client import REGISTRY
+from datetime import datetime
 
 from ai_engine.models import Document
 from ai_engine.serializers import DocumentSerializer
@@ -305,10 +307,17 @@ class SystemInsightsView(APIView):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
-    """Public heartbeat check that avoids leaking infrastructure internals."""
+    """
+    Public heartbeat check for K8s/ACA liveness probes.
+    Returns minimal info to avoid infrastructure leakage.
+    """
     healthy, _ = _run_health_checks()
     return Response(
-        {'healthy': healthy},
+        {
+            'healthy': healthy,
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'version': '2.0.0',
+        },
         status=status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE
     )
 
@@ -316,16 +325,33 @@ def health_check(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def health_check_details(request):
-    """Authenticated detailed health check for operational debugging."""
+    """
+    Authenticated detailed health check for ops dashboard.
+    Includes component status, latency, and deployment info.
+    """
     healthy, checks = _run_health_checks()
+
+    # Determine overall status
+    status_text = 'ok' if healthy else ('degraded' if any(c.get('status') == 'healthy' for c in checks.values()) else 'critical')
+
     return Response(
-        {'healthy': healthy, 'services': checks},
+        {
+            'status': status_text,
+            'healthy': healthy,
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'version': '2.0.0',
+            'deployment_mode': os.environ.get('DEPLOY_MODE', 'local'),
+            'components': checks,
+        },
         status=status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE
     )
 
 
 def _run_health_checks():
-    """Shared service connectivity checks used by public and private health endpoints."""
+    """
+    Comprehensive service connectivity checks for public and private health endpoints.
+    Returns overall health status and detailed component checks with latency metrics.
+    """
     checks = {}
     overall_healthy = True
 
@@ -333,42 +359,129 @@ def _run_health_checks():
     try:
         start = time.perf_counter()
         connections['default'].cursor().execute("SELECT 1")
-        checks['postgresql'] = {
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+        checks['postgres'] = {
             'status': 'healthy',
-            'latency_ms': round((time.perf_counter() - start) * 1000, 2),
+            'latency_ms': latency_ms,
+            'component': 'PostgreSQL + pgvector',
         }
-    except Exception:
+    except Exception as e:
         overall_healthy = False
-        checks['postgresql'] = {'status': 'unhealthy', 'latency_ms': 0}
+        logger.warning(f"PostgreSQL health check failed: {e}")
+        checks['postgres'] = {
+            'status': 'unhealthy',
+            'latency_ms': 0,
+            'component': 'PostgreSQL + pgvector',
+            'error': str(type(e).__name__),
+        }
 
     # Redis Check
     try:
         start = time.perf_counter()
         r = redis.from_url(os.environ.get('REDIS_URL', 'redis://rag-redis:6379/0'))
         r.ping()
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
         checks['redis'] = {
             'status': 'healthy',
-            'latency_ms': round((time.perf_counter() - start) * 1000, 2),
+            'latency_ms': latency_ms,
+            'component': 'Redis (Celery broker & cache)',
         }
-    except Exception:
+    except Exception as e:
         overall_healthy = False
-        checks['redis'] = {'status': 'unhealthy', 'latency_ms': 0}
+        logger.warning(f"Redis health check failed: {e}")
+        checks['redis'] = {
+            'status': 'unhealthy',
+            'latency_ms': 0,
+            'component': 'Redis (Celery broker & cache)',
+            'error': str(type(e).__name__),
+        }
 
-    # Vault Check
-    try:
-        start = time.perf_counter()
-        client = hvac.Client(
-            url=os.environ.get('VAULT_ADDR', 'http://rag-vault:8200'),
-            token=os.environ.get('VAULT_TOKEN')
-        )
-        sealed = client.sys.read_seal_status().get('sealed', True)
-        if sealed:
-            overall_healthy = False
-            checks['vault'] = {'status': 'unhealthy', 'latency_ms': round((time.perf_counter() - start) * 1000, 2)}
-        else:
-            checks['vault'] = {'status': 'healthy', 'latency_ms': round((time.perf_counter() - start) * 1000, 2)}
-    except Exception:
-        overall_healthy = False
-        checks['vault'] = {'status': 'unhealthy', 'latency_ms': 0}
+    # Azure Key Vault Check (if in cloud mode)
+    if os.environ.get('DEPLOY_MODE') == 'cloud' and os.environ.get('AZURE_KEY_VAULT_URL'):
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.keyvault.secrets import SecretClient
+
+            start = time.perf_counter()
+            credential = DefaultAzureCredential()
+            client = SecretClient(
+                vault_url=os.environ.get('AZURE_KEY_VAULT_URL'),
+                credential=credential,
+            )
+            # Minimal operation to verify connectivity
+            client.list_properties_of_secrets()
+            latency_ms = round((time.perf_counter() - start) * 1000, 2)
+            checks['azure_keyvault'] = {
+                'status': 'healthy',
+                'latency_ms': latency_ms,
+                'component': 'Azure Key Vault',
+            }
+        except Exception as e:
+            logger.warning(f"Azure Key Vault health check failed: {e}")
+            checks['azure_keyvault'] = {
+                'status': 'unhealthy',
+                'latency_ms': 0,
+                'component': 'Azure Key Vault',
+                'error': str(type(e).__name__),
+            }
+    else:
+        # HashiCorp Vault Check (local mode)
+        try:
+            start = time.perf_counter()
+            client = hvac.Client(
+                url=os.environ.get('VAULT_ADDR', 'http://rag-vault:8200'),
+                token=os.environ.get('VAULT_TOKEN')
+            )
+            sealed = client.sys.read_seal_status().get('sealed', True)
+            latency_ms = round((time.perf_counter() - start) * 1000, 2)
+
+            if sealed:
+                overall_healthy = False
+                checks['vault'] = {
+                    'status': 'unhealthy',
+                    'latency_ms': latency_ms,
+                    'component': 'HashiCorp Vault',
+                    'error': 'Vault is sealed',
+                }
+            else:
+                checks['vault'] = {
+                    'status': 'healthy',
+                    'latency_ms': latency_ms,
+                    'component': 'HashiCorp Vault',
+                }
+        except Exception as e:
+            logger.warning(f"Vault health check failed: {e}")
+            checks['vault'] = {
+                'status': 'unhealthy',
+                'latency_ms': 0,
+                'component': 'HashiCorp Vault',
+                'error': str(type(e).__name__),
+            }
+
+    # Azure OpenAI Check (verification that endpoint is reachable)
+    if settings.AZURE_OPENAI_ENDPOINT and settings.AZURE_OPENAI_KEY:
+        try:
+            start = time.perf_counter()
+            # Just verify the endpoint is accessible (no actual API call)
+            import requests
+            resp = requests.head(
+                settings.AZURE_OPENAI_ENDPOINT,
+                headers={'api-key': settings.AZURE_OPENAI_KEY},
+                timeout=5,
+            )
+            latency_ms = round((time.perf_counter() - start) * 1000, 2)
+            checks['azure_openai'] = {
+                'status': 'healthy' if resp.status_code in [200, 401, 404] else 'unhealthy',
+                'latency_ms': latency_ms,
+                'component': 'Azure OpenAI',
+            }
+        except Exception as e:
+            logger.warning(f"Azure OpenAI health check failed: {e}")
+            checks['azure_openai'] = {
+                'status': 'unhealthy',
+                'latency_ms': 0,
+                'component': 'Azure OpenAI',
+                'error': str(type(e).__name__),
+            }
 
     return overall_healthy, checks

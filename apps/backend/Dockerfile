@@ -1,6 +1,6 @@
 ###############################################################################
-# VeriRAG Backend — Production-Grade Multi-Stage Dockerfile
-# AZ-400 Best Practices: non-root user, minimal image, pinned versions
+# VeriRAG Backend — Production-Grade Multi-Stage Dockerfile for ACA
+# Best Practices: non-root user, minimal image, ACA-optimized runtime
 ###############################################################################
 
 # ── Stage 1: Builder ────────────────────────────────────────────────────────
@@ -60,13 +60,26 @@ USER verirag
 
 EXPOSE 8000
 
+# ACA-optimized health check (30s timeout for ACA graceful shutdown window)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/api/health/ || exit 1
 
-# Production: gunicorn; override in docker-compose for dev
+# Graceful shutdown signal (tells ACA to use SIGTERM)
+STOPSIGNAL SIGTERM
+
+# Production: gunicorn with ACA-optimized settings
+# - workers: 3 (adjust based on ACA CPU allocation)
+# - graceful-timeout: 30s (ACA sends SIGTERM before this)
+# - timeout: 60s (individual request max time)
+# - max-requests: 1000 (prevent memory leaks)
+# - keep-alive: 65 (connection persistence)
 CMD ["gunicorn", "rag_backend.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "3", \
-     "--timeout", "120", \
+     "--graceful-timeout", "30", \
+     "--timeout", "60", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "100", \
+     "--keep-alive", "65", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]

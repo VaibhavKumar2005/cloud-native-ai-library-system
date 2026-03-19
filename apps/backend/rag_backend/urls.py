@@ -31,6 +31,8 @@ from .auth_views import (
     GoogleOAuthStartView,
     OAuthExchangeView,
     ThrottledTokenObtainPairView,
+    EmailLoginSendView,
+    EmailLoginVerifyView,
 )
 
 # 1. Add this import for the Swagger UI
@@ -51,6 +53,10 @@ urlpatterns = [
     path('api/auth/google/callback/', GoogleOAuthCallbackView.as_view(), name='google_oauth_callback'),
     path('api/auth/github/start/', GitHubOAuthStartView.as_view(), name='github_oauth_start'),
     path('api/auth/github/callback/', GitHubOAuthCallbackView.as_view(), name='github_oauth_callback'),
+
+    # Email authentication (passwordless magic links)
+    path('api/auth/email/send/', EmailLoginSendView.as_view(), name='email_login_send'),
+    path('api/auth/email/verify/', EmailLoginVerifyView.as_view(), name='email_login_verify'),
     
     # 2. Add these two lines for the API Interface
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

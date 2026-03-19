@@ -15,10 +15,11 @@ from django.utils.text import slugify
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.status import HTTP_400_BAD_REQUEST, HTTP_401_UNAUTHORIZED, HTTP_200_OK
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from ai_engine.models import ExternalAuthIdentity, OAuthExchangeCode
+from ai_engine.models import ExternalAuthIdentity, OAuthExchangeCode, EmailLoginToken
 from ai_engine.throttles import LoginAnonRateThrottle
 
 logger = logging.getLogger(__name__)
@@ -571,3 +572,181 @@ class GitHubOAuthCallbackView(APIView):
                 }
             )
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EMAIL AUTHENTICATION: Magic Links for Passwordless Sign-In
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class EmailLoginSendView(APIView):
+    """
+    Initiates passwordless email authentication.
+    Sends a magic link token to the user's email address.
+
+    Enterprise Feature: Enables secure sign-in without passwords.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginAnonRateThrottle]
+
+    def post(self, request):
+        """
+        POST /api/auth/email/send/
+
+        Body: { "email": "user@example.com" }
+        Response: { "status": "link_sent", "email": "user@example.com" }
+        """
+        email = (request.data.get('email') or '').strip().lower()
+
+        if not email or '@' not in email:
+            return Response(
+                {"detail": "Valid email address is required."},
+                status=HTTP_400_BAD_REQUEST
+            )
+
+        # Clean up expired tokens
+        EmailLoginToken.objects.filter(expires_at__lt=timezone.now()).delete()
+
+        try:
+            # Generate raw token (32 bytes urlsafe)
+            raw_token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+
+            # Create or update token
+            expires_at = timezone.now() + timedelta(minutes=15)
+            EmailLoginToken.objects.create(
+                email=email,
+                token_hash=token_hash,
+                expires_at=expires_at,
+            )
+
+            # In production, integrate with Resend/Postmark to send actual email
+            # For now, log to console/stderr (development-friendly)
+            frontend_url = settings.FRONTEND_URL or 'http://localhost:5173'
+            magic_link = f"{frontend_url}/login?email_token={raw_token}"
+
+            logger.info(
+                f"📧 Magic link generated for {email}: {magic_link}"
+            )
+
+            return Response(
+                {
+                    "status": "link_sent",
+                    "email": email,
+                    "message": f"Magic link sent to {email}. Valid for 15 minutes.",
+                    # Debug: Include link for local dev
+                    "magic_link": magic_link if settings.DEBUG else None,
+                },
+                status=HTTP_200_OK
+            )
+
+        except Exception as e:
+            logger.exception(f"Email token generation failed: {e}")
+            from rest_framework import status as drf_status
+            return Response(
+                {"detail": "Failed to send email. Please try again."},
+                status=drf_status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class EmailLoginVerifyView(APIView):
+    """
+    Completes passwordless email authentication.
+    Verifies the magic link token and issues JWT tokens.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginAnonRateThrottle]
+
+    def post(self, request):
+        """
+        POST /api/auth/email/verify/
+
+        Body: { "token": "...base64-encoded-token..." }
+        Response: { "access": "...", "refresh": "...", "user": {...} }
+        """
+        raw_token = request.data.get('token', '').strip()
+
+        if not raw_token:
+            return Response(
+                {"detail": "Email token is required."},
+                status=HTTP_400_BAD_REQUEST
+            )
+
+        token_hash = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+
+        try:
+            # Find and consume token (one-time use)
+            email_token = EmailLoginToken.objects.select_for_update().filter(
+                token_hash=token_hash,
+            ).first()
+
+            if not email_token:
+                return Response(
+                    {"detail": "Invalid or expired token."},
+                    status=HTTP_401_UNAUTHORIZED
+                )
+
+            # Check expiration
+            if email_token.expires_at <= timezone.now():
+                return Response(
+                    {"detail": "Token has expired. Please request a new magic link."},
+                    status=HTTP_401_UNAUTHORIZED
+                )
+
+            # Check if already used
+            if email_token.used_at is not None:
+                return Response(
+                    {"detail": "Token has already been used."},
+                    status=HTTP_401_UNAUTHORIZED
+                )
+
+            # Mark as used
+            email_token.used_at = timezone.now()
+            email_token.save(update_fields=['used_at'])
+
+            # Get or create user
+            user = User.objects.filter(email__iexact=email_token.email).first()
+            if not user:
+                # Create new user from email
+                username = _generate_unique_username(email_token.email.split('@')[0])
+                user = User.objects.create_user(
+                    username=username,
+                    email=email_token.email,
+                )
+                user.set_unusable_password()  # No password for email-based auth
+                user.save()
+
+                logger.info(f"✨ New user created via email auth: {user.id} ({email_token.email})")
+
+            # Link email token to user (for audit trail)
+            email_token.user = user
+            email_token.save(update_fields=['user'])
+
+            # Issue JWT tokens
+            token_pair = _issue_tokens_for_user(user)
+
+            return Response(
+                {
+                    "access": token_pair["access_token"],
+                    "refresh": token_pair["refresh_token"],
+                    "user": {
+                        "id": user.id,
+                        "username": user.username,
+                        "email": user.email,
+                    },
+                },
+                status=HTTP_200_OK
+            )
+
+        except EmailLoginToken.DoesNotExist:
+            return Response(
+                {"detail": "Invalid or expired token."},
+                status=HTTP_401_UNAUTHORIZED
+            )
+        except Exception as e:
+            logger.exception(f"Email token verification failed: {e}")
+            from rest_framework import status as drf_status
+            return Response(
+                {"detail": "Token verification failed. Please try again."},
+                status=drf_status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

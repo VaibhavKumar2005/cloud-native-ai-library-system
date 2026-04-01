@@ -318,7 +318,7 @@ git status --short
 ## Next Action
 
 📋 **Read**: Open [SUMMARY.md](SUMMARY.md) for complete overview  
-🚀 **Build**: Follow [REBUILD_GUIDE.md](REBUILD_GUIDE.md) to rebuild images  
+🚀 **Build**: Follow [REBUILD_GUIDE.md](../guides/REBUILD_GUIDE.md) to rebuild images  
 ✅ **Track**: Use [SECURITY_CHECKLIST.md](SECURITY_CHECKLIST.md) during deployment
 
 ---

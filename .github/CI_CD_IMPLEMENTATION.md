@@ -212,8 +212,8 @@ See [.github/GIT_WORKFLOW.md](../.github/GIT_WORKFLOW.md) for detailed examples.
 
 - **CI/CD Setup**: See [.github/GITHUB_ACTIONS_SETUP.md](../.github/GITHUB_ACTIONS_SETUP.md)
 - **Git Workflow**: See [.github/GIT_WORKFLOW.md](../.github/GIT_WORKFLOW.md)
-- **Deployment**: See [infrastructure/deploy.ps1](../infrastructure/deploy.ps1)
-- **Testing**: See [test-api.ps1](../test-api.ps1)
+- **Deployment**: See [ops/infrastructure/deploy.ps1](../ops/infrastructure/deploy.ps1)
+- **Testing**: See [scripts/testing/test-api.ps1](../scripts/testing/test-api.ps1)
 
 ---
 

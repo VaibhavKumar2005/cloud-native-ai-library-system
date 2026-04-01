@@ -17,7 +17,7 @@ All Trivy-detected vulnerabilities have been remediated through minimal, targete
 
 ## 🎯 Changes Made
 
-### 1. Frontend Dockerfile ([frontend/Dockerfile](frontend/Dockerfile))
+### 1. Frontend Dockerfile ([apps/frontend/Dockerfile](../../apps/frontend/Dockerfile))
 
 **Changes**:
 - ✅ Upgraded `nginx:1.25-alpine` → `nginx:stable-alpine` (runtime stage)
@@ -28,7 +28,7 @@ All Trivy-detected vulnerabilities have been remediated through minimal, targete
 - High: xz, musl, libxslt, openssl, curl issues (22 CVEs)
 - Medium: curl/libcurl, openssl, busybox issues (83 CVEs)
 
-### 2. Backend Dockerfile ([backend/Dockerfile](backend/Dockerfile))
+### 2. Backend Dockerfile ([apps/backend/Dockerfile](../../apps/backend/Dockerfile))
 
 **Changes**:
 - ✅ Added `apt-get upgrade -y` to builder stage (before installing gcc, libpq-dev)
@@ -36,7 +36,7 @@ All Trivy-detected vulnerabilities have been remediated through minimal, targete
 
 **Impact**: Ensures all Debian security patches are applied during image build
 
-### 3. Python Dependencies ([backend/requirements.txt](backend/requirements.txt))
+### 3. Python Dependencies ([apps/backend/requirements.txt](../../apps/backend/requirements.txt))
 
 **Changes**:
 ```diff
@@ -156,9 +156,9 @@ GitHub Actions will automatically:
 
 | File | Status | Description |
 |------|--------|-------------|
-| [`frontend/Dockerfile`](frontend/Dockerfile) | ✅ Modified | Base image upgraded, OS packages upgraded |
-| [`backend/Dockerfile`](backend/Dockerfile) | ✅ Modified | OS packages upgraded in both stages |
-| [`backend/requirements.txt`](backend/requirements.txt) | ✅ Modified | Django, gunicorn, wheel, jaraco.context upgraded |
+| [`apps/frontend/Dockerfile`](../../apps/frontend/Dockerfile) | ✅ Modified | Base image upgraded, OS packages upgraded |
+| [`apps/backend/Dockerfile`](../../apps/backend/Dockerfile) | ✅ Modified | OS packages upgraded in both stages |
+| [`apps/backend/requirements.txt`](../../apps/backend/requirements.txt) | ✅ Modified | Django, gunicorn, wheel, jaraco.context upgraded |
 | [`SECURITY_SCANNING.md`](SECURITY_SCANNING.md) | ✅ Created | Trivy scanning guide |
 | [`SECURITY_REMEDIATION.md`](SECURITY_REMEDIATION.md) | ✅ Created | Detailed remediation report |
 | [`../guides/REBUILD_GUIDE.md`](../guides/REBUILD_GUIDE.md) | ✅ Created | Quick rebuild instructions |
@@ -261,9 +261,9 @@ GitHub Actions will automatically:
 
 ## 🔗 Quick Links
 
-- [Frontend Dockerfile](frontend/Dockerfile)
-- [Backend Dockerfile](backend/Dockerfile)
-- [Python Requirements](backend/requirements.txt)
+- [Frontend Dockerfile](../../apps/frontend/Dockerfile)
+- [Backend Dockerfile](../../apps/backend/Dockerfile)
+- [Python Requirements](../../apps/backend/requirements.txt)
 - [Rebuild Guide](../guides/REBUILD_GUIDE.md)
 - [Security Scanning Guide](SECURITY_SCANNING.md)
 - [Detailed Remediation Report](SECURITY_REMEDIATION.md)

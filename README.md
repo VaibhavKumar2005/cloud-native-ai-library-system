@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Azure-Cloud%20Native-0078D4?style=for-the-badge&logo=microsoftazure" alt="Azure" />
 </p>
 
-# 📚 VeriRAG — The Azure-Native AI Librarian
+# VeriRAG - The Azure-Native AI Librarian
 
 > **A cloud-native, hallucination-resistant Retrieval-Augmented Generation (RAG) platform with dual-agent verification, built for production on Azure Kubernetes Service.**
 
@@ -12,7 +12,7 @@ VeriRAG is an intelligent document library system that ingests PDFs, converts th
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -63,7 +63,7 @@ VeriRAG is an intelligent document library system that ingests PDFs, converts th
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
@@ -82,7 +82,7 @@ VeriRAG is an intelligent document library system that ingests PDFs, converts th
 
 ---
 
-## 🚀 Local Development Setup
+## Local Development Setup
 
 ### Prerequisites
 
@@ -196,7 +196,7 @@ The frontend will be available at `http://localhost:5173` and the backend API at
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 cloud-native-ai-library-system/
@@ -257,11 +257,11 @@ cloud-native-ai-library-system/
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run backend tests with Pytest
-cd backend
+cd apps/backend
 pytest tests/ -v --tb=short
 
 # Run with coverage report
@@ -272,13 +272,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the dual-agent verification
 
 ---
 
-## ☸️ Kubernetes Deployment
+## Kubernetes Deployment
 
-Production-grade Kubernetes manifests are in `k8s/`. Apply them with Kustomize:
+Production-grade Kubernetes manifests are in `ops/k8s/`. Apply them with Kustomize:
 
 ```bash
 # Apply all resources via Kustomize
-kubectl apply -k k8s/
+kubectl apply -k ops/k8s/
 
 # Verify pods are running
 kubectl get pods -n verirag
@@ -294,7 +294,7 @@ For GitOps workflows, point Argo CD or Flux to the `k8s/` directory.
 
 ---
 
-## � CI/CD Pipeline
+## CI/CD Pipeline
 
 VeriRAG uses **GitHub Actions** for automated testing, building, and deployment:
 
@@ -320,7 +320,7 @@ graph LR
 
 ### Quick Start
 
-1. **Add GitHub secrets and variables** (see [.github/GITHUB_ACTIONS_SETUP.md](.github/GITHUB_ACTIONS_SETUP.md)):
+1. **Add GitHub secrets and variables** (see [GITHUB_ACTIONS_SETUP.md](GITHUB_ACTIONS_SETUP.md)):
    - `REGISTRY_USERNAME`
    - `REGISTRY_PASSWORD`
    - `AZURE_CREDENTIALS`
@@ -337,12 +337,12 @@ graph LR
 4. **View deployment** after the manual workflow completes at your Azure Container Apps URL
 
 For detailed setup instructions and best practices, see:
-- [GitHub Actions Setup Guide](.github/GITHUB_ACTIONS_SETUP.md)
+- [GitHub Actions Setup Guide](GITHUB_ACTIONS_SETUP.md)
 - [Git Workflow Best Practices](.github/GIT_WORKFLOW.md)
 
 ---
 
-## �📊 Observability
+## Observability
 
 - **Prometheus** scrapes custom metrics at `/metrics`:
   - `verirag_hallucination_rejections_total` — blocked hallucinations
@@ -355,7 +355,7 @@ For detailed setup instructions and best practices, see:
 
 ---
 
-## 📄 Documentation
+## Documentation
 
 | Document | Description |
 |----------|-------------|
@@ -366,12 +366,12 @@ For detailed setup instructions and best practices, see:
 
 ---
 
-## 👥 Team 96 — The Azure-Native AI Librarian
+## Team 96 - The Azure-Native AI Librarian
 
 Built for the Azure Cloud-Native hackathon.
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

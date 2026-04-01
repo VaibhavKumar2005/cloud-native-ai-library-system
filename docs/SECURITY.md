@@ -52,7 +52,7 @@ Instead of storing API keys in environment variables or `.env` files, VeriRAG re
 
 ### How It Works
 
-The `get_api_key_from_vault()` function in [rag_logic.py](../backend/ai_engine/rag_logic.py) implements the retrieval logic:
+The `get_api_key_from_vault()` function in [rag_logic.py](../apps/backend/ai_engine/rag_logic.py) implements the retrieval logic:
 
 ```python
 def get_api_key_from_vault(key_name="GOOGLE_API_KEY"):

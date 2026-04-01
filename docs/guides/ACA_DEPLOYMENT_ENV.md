@@ -362,5 +362,5 @@ Ensure:
 
 For more details, see:
 - [Azure Container Apps Documentation](https://learn.microsoft.com/en-us/azure/container-apps/)
-- [Django Settings Reference](./docs/guides/DEPLOYMENT.md)
-- [VeriRAG Architecture Guide](./docs/showcase/ARCHITECTURE.md)
+- [Django Settings Reference](./DEPLOYMENT.md)
+- [VeriRAG Architecture Guide](../showcase/ARCHITECTURE.md)

@@ -267,7 +267,7 @@ steps:
   # Container Apps now pull via their managed identity (granted acrPull role)
 ```
 
-**Setup Required** (see [ACR_WORKLOAD_IDENTITY_SETUP.md](./ACR_WORKLOAD_IDENTITY_SETUP.md)):
+**Setup Required** (see [ACR_WORKLOAD_IDENTITY_SETUP.md](./guides/ACR_WORKLOAD_IDENTITY_SETUP.md)):
 1. Create federated credential on Service Principal (one-time)
 2. Add 3 variables to GitHub Actions (client-id, tenant-id, subscription-id)
 3. Grant Container Apps' managed identities `acrPull` role on ACR
@@ -328,7 +328,7 @@ async def query_library(question: str, user_id: int = 1) -> dict:
 ```
 Claude calls `query_library` automatically, gets answer + faithfulness score.
 
-**Setup** (see [MCP_SERVER_SETUP.md](./MCP_SERVER_SETUP.md)):
+**Setup** (see [MCP_SERVER_SETUP.md](./guides/MCP_SERVER_SETUP.md)):
 1. Install FastMCP: `pip install fastmcp`
 2. Add config to Claude Desktop's `claude_desktop_config.json`
 3. Restart Claude Desktop
@@ -474,6 +474,6 @@ curl http://localhost:8000/api/health/  # Verify backend is running
 ## Questions?
 
 Refer to the new guides:
-- 🔐 ACR Authentication: [ACR_WORKLOAD_IDENTITY_SETUP.md](./ACR_WORKLOAD_IDENTITY_SETUP.md)
-- 🤖 MCP Integration: [MCP_SERVER_SETUP.md](./MCP_SERVER_SETUP.md)
+- 🔐 ACR Authentication: [ACR_WORKLOAD_IDENTITY_SETUP.md](./guides/ACR_WORKLOAD_IDENTITY_SETUP.md)
+- 🤖 MCP Integration: [MCP_SERVER_SETUP.md](./guides/MCP_SERVER_SETUP.md)
 - 📊 Technical Review (original): [../VeriRAG_Technical_Review.md](../VeriRAG_Technical_Review.md)

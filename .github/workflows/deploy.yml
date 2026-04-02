@@ -12,7 +12,8 @@ on:
 
 env:
   # Azure Container Registry
-  ACR_REGISTRY: acrvaibhavrag2026.azurecr.io
+  ACR_NAME: ${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}
+  ACR_REGISTRY: ${{ vars.ACR_REGISTRY || 'acrvaibhavrag2026.azurecr.io' }}
   ACR_REPOSITORY: verirag
   IMAGE_TAG: ${{ github.sha }}
   IMAGE_TAG_SHORT: ${{ github.sha }}
@@ -71,6 +72,8 @@ jobs:
           [[ -z "${{ env.AZURE_CLIENT_ID }}" ]] && MISSING_VARS+=("AZURE_CLIENT_ID")
           [[ -z "${{ env.AZURE_TENANT_ID }}" ]] && MISSING_VARS+=("AZURE_TENANT_ID")
           [[ -z "${{ env.AZURE_SUBSCRIPTION_ID }}" ]] && MISSING_VARS+=("AZURE_SUBSCRIPTION_ID")
+          [[ -z "${{ env.ACR_NAME }}" ]] && MISSING_VARS+=("ACR_NAME")
+          [[ -z "${{ env.ACR_REGISTRY }}" ]] && MISSING_VARS+=("ACR_REGISTRY")
           [[ -z "${{ env.AZURE_RESOURCE_GROUP }}" ]] && MISSING_VARS+=("AZURE_RESOURCE_GROUP")
           [[ -z "${{ env.BACKEND_APP_NAME }}" ]] && MISSING_VARS+=("BACKEND_APP_NAME")
           [[ -z "${{ env.CELERY_APP_NAME }}" ]] && MISSING_VARS+=("CELERY_APP_NAME")
@@ -295,9 +298,29 @@ jobs:
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Validate ACR exists in subscription
+        run: |
+          LOGIN_SERVER=$(az acr show --name "${{ env.ACR_NAME }}" --query loginServer -o tsv)
+
+          if [[ -z "$LOGIN_SERVER" ]]; then
+            echo "❌ Azure Container Registry '${{ env.ACR_NAME }}' was not found in subscription '${{ env.AZURE_SUBSCRIPTION_ID }}'."
+            echo "Set GitHub variable ACR_NAME to the registry resource name and ACR_REGISTRY to its login server."
+            exit 1
+          fi
+
+          if [[ "$LOGIN_SERVER" != "${{ env.ACR_REGISTRY }}" ]]; then
+            echo "❌ ACR_REGISTRY mismatch."
+            echo "Expected login server: $LOGIN_SERVER"
+            echo "Configured ACR_REGISTRY: ${{ env.ACR_REGISTRY }}"
+            echo "Update the GitHub Actions variable ACR_REGISTRY to match the registry login server."
+            exit 1
+          fi
+
+          echo "✅ Found Azure Container Registry: $LOGIN_SERVER"
+
       - name: Login to ACR
         run: |
-          az acr login --name $(echo ${{ env.ACR_REGISTRY }} | cut -d. -f1)
+          az acr login --name "${{ env.ACR_NAME }}"
 
       - name: Build & push backend image
         uses: docker/build-push-action@v6

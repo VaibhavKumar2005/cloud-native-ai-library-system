@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -7,7 +9,7 @@
   body {
     @apply bg-slate-950 text-slate-200 antialiased;
     margin: 0;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Manrope', 'Segoe UI', sans-serif;
   }
   :root {
     --background: 0 0% 100%;
@@ -65,7 +67,7 @@
 }
 
 :root {
-  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
   background-color: #040207;
   color: #f8fafc;
 }
@@ -74,6 +76,25 @@ body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: 'Space Grotesk', 'Manrope', sans-serif;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.3);
+  color: #f8fafc;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.7);
+  outline-offset: 2px;
 }
 
 /* Custom smooth scrollbar */
@@ -101,8 +122,20 @@ body {
 .bento-card:hover {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.1);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(ellipse at center, black 35%, transparent 78%);
+  opacity: 0.2;
 }
 
 /* === Animated Gauge === */
@@ -130,7 +163,7 @@ body {
   position: absolute;
   border-radius: 50%;
   filter: blur(80px);
-  opacity: 0.15;
+  opacity: 0.18;
   animation: orb-float 20s ease-in-out infinite;
   pointer-events: none;
 }
@@ -192,6 +225,21 @@ body {
   opacity: 0;
 }
 
+@keyframes float-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.float-in-up {
+  animation: float-in-up 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 /* === Custom thin scrollbar for panels === */
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
@@ -205,4 +253,15 @@ body {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

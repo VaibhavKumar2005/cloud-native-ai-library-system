@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import {
-  Shield, Upload, MessageSquare, FileText,
+  Shield, Upload, MessageSquare, FileText, CheckCircle,
   Cpu, Database, Lock, Zap, BrainCircuit, TrendingUp, ArrowUpRight,
   ArrowDownRight, Sparkles, Clock, Search
 } from "lucide-react"
@@ -202,10 +202,18 @@ export default function Dashboard({ onLogout }) {
   })
   const [documents, setDocuments] = useState([])
   const [systemMetrics, setSystemMetrics] = useState(null)
+  const [opsDashboard, setOpsDashboard] = useState(null)
+  const [opsCostMetrics, setOpsCostMetrics] = useState(null)
   const [metricsLoaded, setMetricsLoaded] = useState(false)
   const [selectedChatIndex, setSelectedChatIndex] = useState(0)
   const [queryError, setQueryError] = useState('')
   const chatEndRef = useRef(null)
+
+  const querySuggestions = [
+    'Summarize the key compliance risks in the uploaded policies.',
+    'What documents mention Azure Container Apps or Terraform?',
+    'Which sections describe the verification or security workflow?',
+  ]
 
   const getDocumentStatusMeta = useCallback((doc) => {
     const status = doc.status || (doc.processed ? 'indexed' : 'queued')
@@ -282,10 +290,24 @@ export default function Dashboard({ onLogout }) {
 
   const fetchSystemMetrics = useCallback(async () => {
     try {
-      const res = await api.get('/api/system-insights/')
-      setSystemMetrics(res.data)
-      setMetricsLoaded(true)
+      const [insightsRes, opsRes, costRes] = await Promise.allSettled([
+        api.get('/api/system-insights/'),
+        api.get('/api/ai/ops/dashboard/'),
+        api.get('/api/ai/ops/cost/today/'),
+      ])
+      if (insightsRes.status === 'fulfilled') {
+        setSystemMetrics(insightsRes.value.data)
+      }
+      if (opsRes.status === 'fulfilled') {
+        setOpsDashboard(opsRes.value.data)
+      }
+      if (costRes.status === 'fulfilled') {
+        setOpsCostMetrics(costRes.value.data)
+      }
     } catch { /* silent */ }
+    finally {
+      setMetricsLoaded(true)
+    }
   }, [])
 
   useEffect(() => {
@@ -434,11 +456,37 @@ export default function Dashboard({ onLogout }) {
     ? chatHistory.filter(c => c.verification_passed).length / chatHistory.length
     : 0
 
+  const latestLatency = chatHistory[0]?.latency_ms || 0
+  const latestTokens = chatHistory[0]?.tokens_used || 0
+  const totalTokens = opsCostMetrics?.metrics?.total_tokens || 0
+  const avgCostPerRequest = opsCostMetrics?.metrics?.avg_cost_per_request || 0
+  const budgetUtilization = opsDashboard?.cost?.today?.budget_utilization || 0
+  const budgetRemaining = opsDashboard?.cost?.today?.budget_remaining || 0
+  const qualityPassRate = opsDashboard?.quality?.week?.average_score
+    ? Math.round(opsDashboard.quality.week.average_score * 100)
+    : 0
+  const opsTrend = opsDashboard?.quality?.week?.trending || 'unknown'
+
+  const workspaceReady = metricsLoaded && indexedDocuments.length > 0
+  const readinessLabel = !metricsLoaded
+    ? 'Syncing workspace'
+    : workspaceReady
+      ? 'Ready to answer'
+      : 'Waiting on ingestion'
+
   const metricCards = [
     { label: 'Hallucinations Blocked', value: systemMetrics?.metrics?.hallucinations_prevented, icon: Shield, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', sparkColor: '#f59e0b' },
     { label: 'Failover Recoveries', value: systemMetrics?.metrics?.failover_recoveries, icon: Zap, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', sparkColor: '#3b82f6' },
     { label: 'Total Queries', value: systemMetrics?.metrics?.total_queries, icon: BrainCircuit, color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20', sparkColor: '#8b5cf6' },
     { label: 'Docs Ingested', value: systemMetrics?.metrics?.documents_ingested ?? documents.length, icon: FileText, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', sparkColor: '#10b981' },
+  ]
+
+  const observabilityCards = [
+    { label: 'Tokens', value: totalTokens, caption: 'Processed by CostOps', icon: BrainCircuit, tone: 'text-cyan-300', bg: 'bg-cyan-500/10' },
+    { label: 'Avg cost', value: avgCostPerRequest ? `$${avgCostPerRequest.toFixed(4)}` : '—', caption: 'Per query', icon: Zap, tone: 'text-emerald-300', bg: 'bg-emerald-500/10' },
+    { label: 'Budget used', value: `${budgetUtilization.toFixed(1)}%`, caption: `$${budgetRemaining.toFixed(2)} remaining`, icon: TrendingUp, tone: 'text-amber-300', bg: 'bg-amber-500/10' },
+    { label: 'Latest query', value: latestLatency ? `${latestLatency.toFixed(0)} ms` : '—', caption: `${latestTokens || 0} tokens`, icon: Clock, tone: 'text-violet-300', bg: 'bg-violet-500/10' },
+    { label: 'Quality', value: `${qualityPassRate}%`, caption: `Trend: ${opsTrend}`, icon: CheckCircle, tone: 'text-emerald-300', bg: 'bg-emerald-500/10' },
   ]
 
   /* ═════════════════════════════════════════════════════════════════════
@@ -455,6 +503,92 @@ export default function Dashboard({ onLogout }) {
         </Button>
       }
     >
+        <div className="mb-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <BentoCard className="p-6 md:p-7">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-2xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.24em] text-cyan-200">
+                  <Sparkles className="h-3 w-3" />
+                  Verified workspace
+                </div>
+                <h2 className="mt-4 text-2xl font-bold tracking-tight text-white md:text-3xl">
+                  Ask grounded questions, then inspect the evidence behind every answer.
+                </h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300 md:text-base">
+                  VeriRAG keeps the flow simple: upload PDFs, watch indexing, ask a question, and review the citations and verification trace before you trust the response.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-right">
+                <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-slate-500">Workspace state</p>
+                <p className="mt-1 text-sm font-semibold text-white">{readinessLabel}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-slate-500">Documents</p>
+                <p className="mt-2 text-2xl font-black text-white tabular-nums">{documents.length}</p>
+                <p className="mt-1 text-xs text-slate-400">In the library</p>
+              </div>
+              <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-slate-500">Queries</p>
+                <p className="mt-2 text-2xl font-black text-white tabular-nums">{chatHistory.length}</p>
+                <p className="mt-1 text-xs text-slate-400">Reviewed by the verifier</p>
+              </div>
+              <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-slate-500">Verified rate</p>
+                <p className="mt-2 text-2xl font-black text-white tabular-nums">{chatHistory.length > 0 ? Math.round(verifiedRate * 100) : 0}%</p>
+                <p className="mt-1 text-xs text-slate-400">Last 100 interactions</p>
+              </div>
+            </div>
+          </BentoCard>
+
+          <BentoCard className="p-6 md:p-7">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-slate-500">Next action</p>
+                <h3 className="mt-1 text-lg font-semibold text-white">Keep the workspace moving</h3>
+              </div>
+              <div className={`rounded-full border px-3 py-1 text-[10px] font-mono uppercase tracking-[0.18em] ${workspaceReady ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border-amber-400/20 bg-amber-400/10 text-amber-200'}`}>
+                {workspaceReady ? 'Live' : 'Preparing'}
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <p className="text-sm font-medium text-white">1. Upload a PDF</p>
+                <p className="mt-1 text-sm text-slate-400">Drop in source material and let the pipeline index it asynchronously.</p>
+              </div>
+              <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <p className="text-sm font-medium text-white">2. Ask a focused question</p>
+                <p className="mt-1 text-sm text-slate-400">Keep the query specific enough that citations can prove the answer.</p>
+              </div>
+              <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+                <p className="text-sm font-medium text-white">3. Review evidence first</p>
+                <p className="mt-1 text-sm text-slate-400">Use the verification panel to confirm what the model actually used.
+                </p>
+              </div>
+            </div>
+          </BentoCard>
+        </div>
+
+        <div className="mb-6 grid gap-3 md:grid-cols-5">
+          {observabilityCards.map(({ label, value, caption, icon: Icon, tone, bg }) => (
+            <BentoCard key={label} className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-slate-500">{label}</p>
+                  <p className={`mt-2 text-2xl font-black tabular-nums ${tone}`}>{value}</p>
+                  <p className="mt-1 text-xs text-slate-400">{caption}</p>
+                </div>
+                <div className={`rounded-2xl border border-white/5 ${bg} p-3`}>
+                  <Icon className={`h-4 w-4 ${tone}`} />
+                </div>
+              </div>
+            </BentoCard>
+          ))}
+        </div>
+
         {/* ── BENTO GRID ─────────────────────────────────────────────── */}
         <div className="grid grid-cols-12 gap-3.5 auto-rows-min">
 
@@ -638,10 +772,13 @@ export default function Dashboard({ onLogout }) {
             </div>
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
               {documents.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
-                  <FileText className="w-8 h-8 opacity-20" />
-                  <p className="text-xs">No documents yet</p>
-                  <p className="text-[10px] text-slate-700">Upload a PDF to get started</p>
+                <div className="flex h-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/5 bg-white/[0.02] px-4 py-8 text-center text-slate-600">
+                  <FileText className="w-9 h-9 opacity-20" />
+                  <div>
+                    <p className="text-sm font-medium text-slate-400">No documents yet</p>
+                    <p className="mt-1 text-xs text-slate-600">Upload a PDF to unlock grounded answers and evidence tracing.</p>
+                  </div>
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-slate-700">Tip: start with a policy, handbook, or spec</p>
                 </div>
               )}
               {documents.map((doc, idx) => {
@@ -704,13 +841,25 @@ export default function Dashboard({ onLogout }) {
             <div className="grid flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)] min-h-0">
               <div className="px-6 py-4 overflow-y-auto space-y-5 custom-scrollbar border-b xl:border-b-0 xl:border-r border-white/5">
                 {chatHistory.length === 0 && (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-600 gap-3">
+                  <div className="flex h-full flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-white/5 bg-white/[0.02] px-4 py-8 text-slate-600">
                     <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5">
                       <Search className="w-8 h-8 opacity-30" />
                     </div>
                     <div className="text-center">
-                      <p className="text-sm font-medium text-slate-500">Ask VeriRAG a question</p>
-                      <p className="text-xs text-slate-700 mt-1">Responses are verified against your indexed document library</p>
+                      <p className="text-sm font-medium text-slate-400">Ask VeriRAG a question</p>
+                      <p className="text-xs text-slate-600 mt-1">Responses are verified against your indexed document library.</p>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2 pt-2">
+                      {querySuggestions.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setQuery(suggestion)}
+                          className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[10px] text-slate-300 transition hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-white"
+                        >
+                          {suggestion.length > 42 ? `${suggestion.slice(0, 42)}…` : suggestion}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -747,12 +896,22 @@ export default function Dashboard({ onLogout }) {
                         </span>
                       </div>
                       <p className="text-sm text-slate-200 leading-relaxed">{chat.answer}</p>
-                      <div className="flex items-center gap-3 pt-2 border-t border-white/5">
-                        <span className="text-[10px] font-mono text-slate-500">Faithfulness</span>
-                        <Progress value={(chat.faithfulness_score || 0) * 100} className="h-1.5 flex-1 bg-white/5" />
-                        <span className="text-xs font-bold tabular-nums text-emerald-400">
-                          {((chat.faithfulness_score || 0) * 100).toFixed(0)}%
-                        </span>
+                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/5 text-[10px] text-slate-500">
+                        <div>
+                          <span className="font-mono uppercase tracking-widest">Faithfulness</span>
+                          <p className="mt-1 text-sm font-bold tabular-nums text-emerald-400">
+                            {((chat.faithfulness_score || 0) * 100).toFixed(0)}%
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-mono uppercase tracking-widest">Latency</span>
+                          <p className="mt-1 text-sm font-bold tabular-nums text-cyan-300">
+                            {chat.latency_ms ? `${chat.latency_ms.toFixed(0)} ms` : '—'}
+                          </p>
+                        </div>
+                        <div className="col-span-2">
+                          <Progress value={(chat.faithfulness_score || 0) * 100} className="h-1.5 w-full bg-white/5" />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -774,6 +933,18 @@ export default function Dashboard({ onLogout }) {
                 {!selectedChat ? (
                   <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 text-sm text-slate-600">
                     Run a verified query to inspect the supporting evidence here.
+                    <div className="mt-4 grid gap-2">
+                      {querySuggestions.slice(0, 2).map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setQuery(suggestion)}
+                          className="rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 text-left text-xs text-slate-300 transition hover:border-cyan-400/30 hover:bg-cyan-400/10"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -871,6 +1042,11 @@ export default function Dashboard({ onLogout }) {
               {queryError && (
                 <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
                   {queryError}
+                </div>
+              )}
+              {!queryError && loading && (
+                <div className="mt-3 rounded-xl border border-indigo-500/20 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-200">
+                  Retrieving documents, scoring evidence, and generating a verified response.
                 </div>
               )}
               {indexedDocuments.length === 0 && (

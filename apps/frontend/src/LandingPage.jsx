@@ -42,7 +42,8 @@ export default function LandingPage() {
   const authed = useMemo(() => isAuthenticated(), [])
 
   return (
-    <div className="min-h-screen bg-[#040207] text-slate-50">
+    <div className="min-h-screen overflow-x-hidden bg-[#040207] text-slate-50">
+      <div className="hero-grid" />
       <div className="orb w-[460px] h-[460px] bg-cyan-500 top-[-12%] left-[-8%]" />
       <div className="orb w-[420px] h-[420px] bg-emerald-500 bottom-[8%] right-[-10%]" style={{ animationDelay: '6s' }} />
       <div className="orb w-[320px] h-[320px] bg-orange-500 top-[30%] right-[18%]" style={{ animationDelay: '12s' }} />
@@ -80,7 +81,7 @@ export default function LandingPage() {
 
       <main className="relative z-10 mx-auto max-w-7xl px-6 pb-16 pt-14">
         <section className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
-          <div className="space-y-8">
+          <div className="float-in-up space-y-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.24em] text-cyan-200">
               <Sparkles className="h-3 w-3" />
               Blueprint Phase
@@ -108,6 +109,9 @@ export default function LandingPage() {
                 Current Auth Flow
               </Button>
             </div>
+            <p className="max-w-xl text-sm text-slate-400">
+              Start with login if you are testing auth and provider flows, or open workspace directly if you already have a session.
+            </p>
             <div className="grid gap-3 md:grid-cols-3">
               {proofPoints.map((item) => (
                 <div key={item.label} className="bento-card p-4">
@@ -118,7 +122,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="bento-card overflow-hidden p-5">
+          <div className="bento-card float-in-up overflow-hidden p-5" style={{ animationDelay: '120ms' }}>
             <div className="rounded-2xl border border-white/5 bg-black/30 p-5">
               <div className="flex items-center justify-between">
                 <div>
@@ -170,15 +174,41 @@ export default function LandingPage() {
         </section>
 
         <section className="mt-20 grid gap-4 md:grid-cols-3">
-          {features.map(({ title, body, icon: Icon }) => (
-            <div key={title} className="bento-card p-6">
+          {features.map(({ title, body, icon: FeatureIcon }) => (
+            <div key={title} className="bento-card float-in-up p-6" style={{ animationDelay: '220ms' }}>
               <div className="inline-flex rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <Icon className="h-5 w-5 text-cyan-300" />
+                <FeatureIcon className="h-5 w-5 text-cyan-300" />
               </div>
               <h2 className="mt-5 text-xl font-semibold text-white">{title}</h2>
               <p className="mt-3 text-sm leading-6 text-slate-300">{body}</p>
             </div>
           ))}
+        </section>
+
+        <section className="mt-14 rounded-3xl border border-white/10 bg-white/[0.02] p-6 md:p-8">
+          <div className="grid gap-6 md:grid-cols-[1.2fr_0.8fr] md:items-center">
+            <div>
+              <h3 className="text-2xl font-bold text-white md:text-3xl">Ready to test the full RAG workflow?</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
+                Upload a document, ask a grounded question, and validate how citation-first responses behave under real retrieval constraints.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 md:justify-end">
+              <Button
+                className="h-11 rounded-2xl bg-emerald-400 px-5 text-slate-950 hover:bg-emerald-300"
+                onClick={() => navigate(authed ? '/app' : '/login')}
+              >
+                Run Live Demo
+              </Button>
+              <Button
+                variant="outline"
+                className="h-11 rounded-2xl border-white/10 bg-transparent px-5 text-slate-100 hover:bg-white/[0.06]"
+                onClick={() => navigate('/login')}
+              >
+                Configure Access
+              </Button>
+            </div>
+          </div>
         </section>
       </main>
     </div>

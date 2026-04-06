@@ -4,7 +4,7 @@
 ###############################################################################
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine3.20 AS builder
 
 # Security: Upgrade all OS packages to latest patched versions
 RUN apk update && apk upgrade --no-cache
@@ -22,7 +22,7 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
 # ── Stage 2: Serve ──────────────────────────────────────────────────────────
-FROM nginx:stable-alpine AS runtime
+FROM nginx:1.27-alpine3.20 AS runtime
 
 # Security: Upgrade all OS packages to latest patched versions
 RUN apk update && apk upgrade --no-cache

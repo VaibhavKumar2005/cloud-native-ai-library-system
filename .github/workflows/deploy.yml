@@ -1,103 +1,63 @@
-name: VeriRAG CI/CD Pipeline
+name: Deploy
 
 on:
-  push:
-    branches: [main, develop]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
-
-env:
-  # Azure Container Registry
-  ACR_NAME: ${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}
-  ACR_REGISTRY: ${{ vars.ACR_REGISTRY || 'acrvaibhavrag2026.azurecr.io' }}
-  ACR_REPOSITORY: verirag
-  IMAGE_TAG: ${{ github.sha }}
-  IMAGE_TAG_SHORT: ${{ github.sha }}
-
-  # Azure Environment
-  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-
-  # ACA App Names
-  BACKEND_APP_NAME: ${{ vars.BACKEND_APP_NAME }}
-  CELERY_APP_NAME: ${{ vars.CELERY_APP_NAME }}
-  FRONTEND_APP_NAME: ${{ vars.FRONTEND_APP_NAME }}
-
-  LOCATION: eastus
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    inputs:
+      git_ref:
+        description: 'Git ref to deploy'
+        required: true
+        default: 'main'
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
 
 permissions:
   contents: read
   id-token: write
-  security-events: write
-  checks: write
-  actions: read
-  pull-requests: write
 
 jobs:
-  # ============================================================================
-  # STAGE 1: Validate Environment & Generate Image Tag
-  # ============================================================================
-  validate:
-    name: Validate Environment
-    runs-on: ubuntu-latest
-    outputs:
-      image-tag-short: ${{ steps.short-sha.outputs.short-sha }}
-      should-deploy: ${{ steps.check-deploy.outputs.should-deploy }}
-    steps:
-      - name: Generate short SHA
-        id: short-sha
-        run: echo "short-sha=${GITHUB_SHA:0:8}" >> "$GITHUB_OUTPUT"
-
-      - name: Check if deployment should run (main branch only)
-        id: check-deploy
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" && "${{ github.event_name }}" == "push" ]]; then
-            echo "should-deploy=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should-deploy=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Validate required variables (deployment only)
-        if: steps.check-deploy.outputs.should-deploy == 'true'
-        run: |
-          MISSING_VARS=()
-
-          [[ -z "${{ env.AZURE_CLIENT_ID }}" ]] && MISSING_VARS+=("AZURE_CLIENT_ID")
-          [[ -z "${{ env.AZURE_TENANT_ID }}" ]] && MISSING_VARS+=("AZURE_TENANT_ID")
-          [[ -z "${{ env.AZURE_SUBSCRIPTION_ID }}" ]] && MISSING_VARS+=("AZURE_SUBSCRIPTION_ID")
-          [[ -z "${{ env.ACR_NAME }}" ]] && MISSING_VARS+=("ACR_NAME")
-          [[ -z "${{ env.ACR_REGISTRY }}" ]] && MISSING_VARS+=("ACR_REGISTRY")
-          [[ -z "${{ env.AZURE_RESOURCE_GROUP }}" ]] && MISSING_VARS+=("AZURE_RESOURCE_GROUP")
-          [[ -z "${{ env.BACKEND_APP_NAME }}" ]] && MISSING_VARS+=("BACKEND_APP_NAME")
-          [[ -z "${{ env.CELERY_APP_NAME }}" ]] && MISSING_VARS+=("CELERY_APP_NAME")
-          [[ -z "${{ env.FRONTEND_APP_NAME }}" ]] && MISSING_VARS+=("FRONTEND_APP_NAME")
-
-          if [ ${#MISSING_VARS[@]} -gt 0 ]; then
-            echo "❌ Missing required variables for deployment:"
-            printf '  - %s\n' "${MISSING_VARS[@]}"
-            exit 1
-          fi
-
-          echo "✅ All required variables are configured"
-
-  # ============================================================================
-  # STAGE 2: Test & Validate
-  # ============================================================================
-  test:
-    name: Test Backend & Frontend
+  deploy:
+    name: Deploy to Azure Container Apps
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: validate
+    environment:
+      name: ${{ inputs.environment }}
 
-    services:
-      postgres:
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: Azure login (Workload Identity)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy backend
+        run: |
+          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER }}/verirag-backend:${{ github.sha }}"
+          az containerapp update \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --name ${{ vars.BACKEND_APP_NAME }} \
+            --image "$IMAGE_URI"
+
+      - name: Deploy frontend
+        run: |
+          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}"
+          az containerapp update \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --name ${{ vars.FRONTEND_APP_NAME }} \
+            --image "$IMAGE_URI"
+
+      - name: Verify deployment
+        run: |
+          az containerapp show \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --name ${{ vars.BACKEND_APP_NAME }} \
+            --query "properties.latestRevisionFqdn" -o tsv
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: admin

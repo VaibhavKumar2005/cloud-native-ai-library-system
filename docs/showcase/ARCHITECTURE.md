@@ -1,6 +1,6 @@
 # VeriRAG — Architecture Deep-Dive
 
-> **Version 2.0 · March 2026**
+> **Version 2.1 · April 2026**
 > Azure-Native AI Library System with Dual-Agent Verification
 
 ---
@@ -26,6 +26,14 @@
 
 VeriRAG is a **Retrieval-Augmented Generation (RAG)** system purpose-built for library document management. What separates it from vanilla RAG is the **Dual-Agent Verification Protocol**: every AI response is cross-checked by an independent "Critic Agent" before reaching the user, producing a quantitative **Faithfulness Score** that prevents hallucinations.
 
+**Primary architecture story (recommended):**
+- AI trust layer: Gemini + Critic verification + Groq fallback
+- Backend data layer: Django + PostgreSQL/pgvector + Redis/Celery
+- Cloud runtime: Azure Container Apps + ACR
+- Infrastructure provisioning: Terraform
+- Observability: Azure Monitor first, Grafana optional
+- Secrets: Azure Key Vault in production, `.env` for local demo
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      USER (React SPA)                       │
@@ -47,8 +55,8 @@ VeriRAG is a **Retrieval-Augmented Generation (RAG)** system purpose-built for l
 │  │  └──────┬───────┘   └───────────────┘                  │  │
 │  │         │                                               │  │
 │  │  ┌──────▼───────┐  ┌────────────┐  ┌──────────────┐   │  │
-│  │  │ PGVector     │  │ Redis      │  │ HashiCorp    │   │  │
-│  │  │ (Embeddings) │  │ (Celery)   │  │ Vault (Keys) │   │  │
+│  │  │ PGVector     │  │ Redis      │  │ Key Vault /  │   │  │
+│  │  │ (Embeddings) │  │ (Celery)   │  │ .env Secrets │   │  │
 │  │  └──────────────┘  └────────────┘  └──────────────┘   │  │
 │  └────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
@@ -70,12 +78,12 @@ VeriRAG is a **Retrieval-Augmented Generation (RAG)** system purpose-built for l
 | **Vector Store** | PostgreSQL 16 + pgvector | Embedding storage & similarity search |
 | **Task Queue** | Celery + Celery Beat | Async PDF ingestion, scheduled maintenance |
 | **Message Broker** | Redis 7 Alpine | Celery broker + result backend |
-| **Secret Manager** | HashiCorp Vault 1.13 (KV v2) | Runtime API key retrieval |
-| **Metrics** | Prometheus + django-prometheus | Custom counters, histograms, gauges |
-| **Dashboards** | Grafana 10 | Visual metrics display |
-| **Tracing** | OpenTelemetry (optional) | Distributed tracing across pipeline |
+| **Secret Manager** | Azure Key Vault (prod) / `.env` (local) | Secure runtime key access with simple dev setup |
+| **Metrics** | Azure Monitor (primary) / Prometheus (optional) | Verification, latency, and failover tracking |
+| **Dashboards** | Azure Monitor Workbooks / Grafana | Visual metrics and operational insights |
+| **Tracing** | Optional | Add distributed tracing as needed |
 | **Containerization** | Docker Compose (dev) | Local development orchestration |
-| **Target Infra** | Azure Kubernetes Service (AKS) | Production deployment target |
+| **Target Infra** | Azure Container Apps + ACR (Terraform) | Primary production deployment target |
 
 ---
 

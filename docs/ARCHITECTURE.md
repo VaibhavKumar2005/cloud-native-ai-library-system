@@ -258,7 +258,7 @@ Workers listen on multiple queues: `celery`, `ingestion`, `monitoring`, `mainten
 ## Security Architecture
 
 See [SECURITY.md](SECURITY.md) for the complete security model including:
-- HashiCorp Vault integration for dynamic API key retrieval
+- Azure Key Vault integration for production API key management (with `.env` for local demo)
 - JWT authentication via SimpleJWT
 - Content Security Policy (CSP) headers
 - Multi-tenant data isolation at the vector store level

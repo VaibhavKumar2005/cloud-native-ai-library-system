@@ -4,7 +4,7 @@
 ###############################################################################
 
 # ── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -23,7 +23,7 @@ RUN pip install --upgrade pip \
     && pip install --prefix=/install -r requirements.txt
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim-bookworm AS runtime
 
 LABEL maintainer="Team96 <team96@verirag.dev>" \
       org.opencontainers.image.title="VeriRAG Backend" \

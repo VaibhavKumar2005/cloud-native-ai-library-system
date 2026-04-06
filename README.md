@@ -6,9 +6,11 @@
 
 # VeriRAG - The Azure-Native AI Librarian
 
-> **A cloud-native, hallucination-resistant Retrieval-Augmented Generation (RAG) platform with dual-agent verification, built for production on Azure Kubernetes Service.**
+> **A cloud-native RAG platform that delivers trustworthy answers through dual-agent verification and LLM failover, with a clear production path on Azure Container Apps.**
 
 VeriRAG is an intelligent document library system that ingests PDFs, converts them to vector embeddings, and answers user questions with **verified, citation-backed responses**. Every AI-generated answer passes through a **Critic Agent** that scores faithfulness against the source material. If the score falls below a configurable threshold, the system automatically fails over to a backup LLM and regenerates the response.
+
+**Positioning:** A cloud-native RAG system that ensures trustworthy AI responses through verification and fallback mechanisms.
 
 ---
 
@@ -48,10 +50,10 @@ VeriRAG is an intelligent document library system that ingests PDFs, converts th
 └──────┬──────────────┬──────────────┬──────────────┬────────────────────┘
        │              │              │              │
        ▼              ▼              ▼              ▼
-  ┌─────────┐   ┌──────────┐  ┌──────────┐   ┌──────────┐
-  │PostgreSQL│   │  Redis   │  │ Vault    │   │Prometheus│
-  │+ pgvector│   │ (Broker) │  │ (Secrets)│   │+ Grafana │
-  └─────────┘   └──────────┘  └──────────┘   └──────────┘
+  ┌─────────┐   ┌──────────┐  ┌──────────────┐  ┌──────────────┐
+  │PostgreSQL│   │  Redis   │  │ Azure Key    │  │ Azure Monitor│
+  │+ pgvector│   │ (Broker) │  │ Vault /.env  │  │ / Grafana    │
+  └─────────┘   └──────────┘  └──────────────┘  └──────────────┘
 ```
 
 ### Request Lifecycle
@@ -74,11 +76,10 @@ VeriRAG is an intelligent document library system that ingests PDFs, converts th
 | **Vector DB** | PostgreSQL 16 + pgvector | Semantic similarity search on document embeddings |
 | **Embeddings** | Google `text-embedding-004` | 768-dim vectors via LangChain |
 | **Task Queue** | Celery + Redis 7 | Async document ingestion & scheduled tasks |
-| **Secret Management** | HashiCorp Vault 1.13 | Dynamic API key retrieval with caching |
-| **Observability** | Prometheus + Grafana | Custom metrics (hallucination rate, failovers, latency) |
-| **Tracing** | OpenTelemetry | Distributed tracing across services |
-| **Infrastructure** | Docker Compose / Kubernetes | Local dev + production-grade k8s manifests |
-| **Cloud** | Azure (ACR, AKS, Terraform) | Container registry + orchestration |
+| **Secret Management** | Azure Key Vault (prod) / `.env` (demo) | Secure key management with a simple local path |
+| **Observability** | Azure Monitor (primary) / Grafana (optional) | Runtime health, latency, and verification metrics |
+| **Infrastructure as Code** | Terraform | Single source of truth for cloud provisioning |
+| **Cloud Runtime** | Azure Container Apps + ACR | Primary production deployment story |
 
 ---
 
@@ -117,10 +118,6 @@ POSTGRES_PORT=5432
 # === Redis ===
 REDIS_URL=redis://rag-redis:6379/0
 
-# === Vault ===
-VAULT_ADDR=http://rag-vault:8200
-VAULT_TOKEN=root
-
 # === App Settings ===
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,backend,rag-backend
@@ -132,39 +129,13 @@ ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,backend,rag-backend
 docker-compose up -d --build
 ```
 
-This spins up **8 containers**: PostgreSQL (pgvector), Redis, Vault, Django backend, Celery worker, Celery beat, Prometheus, and Grafana.
+This spins up the local stack for development: PostgreSQL (pgvector), Redis, Django backend, Celery worker, and Celery beat.
 
-### Step 3: Initialize HashiCorp Vault (Unseal Process)
+### Step 3: Configure Secrets Mode
 
-Vault starts in **dev mode** by default with a root token of `root`. For production-like initialization:
+For local demo work, keep secrets in `.env`.
 
-```powershell
-# Windows (PowerShell)
-.\scripts\setup\init_vault.ps1
-```
-
-**Manual Vault setup (cross-platform):**
-
-```bash
-# 1. Check vault status
-docker exec rag-vault vault status
-
-# 2. If sealed, unseal with your unseal key
-docker exec rag-vault vault operator unseal <UNSEAL_KEY>
-
-# 3. Authenticate with root token
-docker exec rag-vault vault login root
-
-# 4. Enable KV v2 secrets engine
-docker exec rag-vault vault secrets enable -path=secret kv-v2
-
-# 5. Store your API keys securely
-docker exec rag-vault vault kv put secret/myapp \
-  GOOGLE_API_KEY="AIza..." \
-  GROQ_API_KEY="gsk_..."
-```
-
-> **Dev Mode:** When `VAULT_DEV_ROOT_TOKEN_ID=root` is set (default in docker-compose), Vault auto-initializes and unseals on startup. The `scripts/setup/init_vault.ps1` script handles production initialization including key persistence to `vault_keys.txt`.
+For production, move secrets to **Azure Key Vault** and inject them through your deployment configuration.
 
 ### Step 4: Run Database Migrations
 
@@ -190,9 +161,7 @@ The frontend will be available at `http://localhost:5173` and the backend API at
 | Frontend Dashboard | http://localhost:5173 | Your superuser credentials |
 | Django Admin | http://localhost:8000/admin/ | Superuser |
 | Swagger API Docs | http://localhost:8000/api/schema/swagger-ui/ | JWT Token |
-| Prometheus | http://localhost:9090 | — |
-| Grafana | http://localhost:3000 | admin / admin |
-| Vault UI | http://localhost:8200 | Token: `root` |
+| Metrics (optional) | Grafana / Azure Monitor | Configure per environment |
 
 ---
 
@@ -225,7 +194,7 @@ cloud-native-ai-library-system/
 │       │   └── Analytics.jsx   # Query analytics dashboard
 │       └── package.json
 ├── ops/                        # Operations & Infrastructure
-│   ├── k8s/                    # Kubernetes manifests (GitOps-ready)
+│   ├── k8s/                    # Optional Kubernetes assets (secondary path)
 │   │   ├── namespace.yaml      # verirag namespace
 │   │   ├── configmap.yaml      # Non-sensitive environment config
 │   │   ├── secrets.yaml        # Base64-encoded secrets (template)
@@ -233,11 +202,11 @@ cloud-native-ai-library-system/
 │   │   ├── service.yaml        # ClusterIP + NodePort services
 │   │   ├── statefulset.yaml    # PostgreSQL with persistent storage
 │   │   └── kustomization.yaml  # Kustomize resource manager
-│   ├── infrastructure/         # Terraform (Azure ACR + AKS)
+│   ├── infrastructure/         # Terraform (Azure Container Apps + ACR)
 │   │   └── main.tf
-│   ├── gitops/                 # ArgoCD GitOps configuration
-│   ├── helm/                   # Helm charts for production
-│   └── vault/                  # Vault development configuration
+│   ├── gitops/                 # Optional GitOps experiments
+│   ├── helm/                   # Optional Helm packaging
+│   └── vault/                  # Legacy/optional secret-management setup
 ├── docs/                       # Extended documentation
 │   ├── ARCHITECTURE.md         # Dual-agent verification protocol
 │   ├── API_SPEC.md             # REST API reference

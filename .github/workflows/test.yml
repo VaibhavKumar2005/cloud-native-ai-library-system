@@ -1,0 +1,65 @@
+name: Test
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'apps/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd apps/backend
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          cd apps/backend
+          pytest -v --tb=short
+
+  test-frontend:
+    name: Frontend Tests & Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'apps/frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: |
+          cd apps/frontend
+          npm ci
+
+      - name: Lint
+        run: |
+          cd apps/frontend
+          npm run lint
+
+      - name: Tests
+        run: |
+          cd apps/frontend
+          npm test -- --coverage --watchAll=false

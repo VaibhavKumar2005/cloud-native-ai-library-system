@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import React from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Activity, BarChart3, Home, LogOut, Shield, Sparkles, Keyboard } from 'lucide-react'
 import { clearSession } from '@/lib/auth'
@@ -45,7 +46,7 @@ export default function AppShell({
     navigate('/login')
   }
 
-  const commandActions = useMemo(() => [
+  const commandActions = [
     {
       id: 'home',
       label: 'Open home',
@@ -100,7 +101,7 @@ export default function AppShell({
       shortcut: '⌘⇧L',
       run: handleLogout,
     },
-  ], [navigate])
+  ]
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#040207] text-slate-50">
@@ -126,9 +127,9 @@ export default function AppShell({
           </button>
 
           <nav className="mt-8 space-y-2">
-            {navItems.map(({ to, label, icon: NavIcon }) => (
+            {navItems.map(({ to, label, icon }) => (
               <NavLink key={to} to={to} className={({ isActive }) => navClassName(isActive)}>
-                <NavIcon className="h-4 w-4" />
+                {icon ? React.createElement(icon, { className: 'h-4 w-4' }) : null}
                 <span>{label}</span>
               </NavLink>
             ))}

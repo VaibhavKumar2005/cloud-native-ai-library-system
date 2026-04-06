@@ -573,7 +573,7 @@ export default function Dashboard({ onLogout }) {
         </div>
 
         <div className="mb-6 grid gap-3 md:grid-cols-5">
-          {observabilityCards.map(({ label, value, caption, icon: Icon, tone, bg }) => (
+          {observabilityCards.map(({ label, value, caption, icon, tone, bg }) => (
             <BentoCard key={label} className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -582,7 +582,7 @@ export default function Dashboard({ onLogout }) {
                   <p className="mt-1 text-xs text-slate-400">{caption}</p>
                 </div>
                 <div className={`rounded-2xl border border-white/5 ${bg} p-3`}>
-                  <Icon className={`h-4 w-4 ${tone}`} />
+                  {icon ? React.createElement(icon, { className: `h-4 w-4 ${tone}` }) : null}
                 </div>
               </div>
             </BentoCard>

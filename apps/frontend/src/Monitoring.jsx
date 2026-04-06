@@ -28,11 +28,9 @@ const Monitoring = () => {
   const [opsDashboard, setOpsDashboard] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
   const [logs, setLogs] = useState([]);
   const [costHistory, setCostHistory] = useState([]);
   const [qualityHistory, setQualityHistory] = useState([]);
-  const [sessionStart] = useState(new Date());
   const logEndRef = useRef(null);
 
   // ── Ops Dashboard Fetch ──────────────────────────────────────────────
@@ -42,8 +40,6 @@ const Monitoring = () => {
       const data = res.data;
       setOpsDashboard(data);
       setFetchError(null);
-      setLastUpdated(new Date());
-
       // Log ops event
       const costAlert = data.cost.alert ? "⚠️ BUDGET ALERT" : "✅ Budget OK";
       const qualityStatus = data.quality.week.trending;
@@ -82,7 +78,7 @@ const Monitoring = () => {
     } finally {
       if (isInitial) setIsLoading(false);
     }
-  }, [navigate]);
+  }, []);
 
   useEffect(() => {
     fetchOpsDashboard(true);

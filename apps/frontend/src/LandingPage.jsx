@@ -1,3 +1,4 @@
+import React from 'react'
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -174,10 +175,10 @@ export default function LandingPage() {
         </section>
 
         <section className="mt-20 grid gap-4 md:grid-cols-3">
-          {features.map(({ title, body, icon: FeatureIcon }) => (
+          {features.map(({ title, body, icon }) => (
             <div key={title} className="bento-card float-in-up p-6" style={{ animationDelay: '220ms' }}>
               <div className="inline-flex rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                <FeatureIcon className="h-5 w-5 text-cyan-300" />
+                {icon ? React.createElement(icon, { className: 'h-5 w-5 text-cyan-300' }) : null}
               </div>
               <h2 className="mt-5 text-xl font-semibold text-white">{title}</h2>
               <p className="mt-3 text-sm leading-6 text-slate-300">{body}</p>

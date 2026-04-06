@@ -133,7 +133,7 @@ def env_bool(name: str, default: bool = False) -> bool:
     normalized = value.strip().lower()
     if normalized in {'1', 'true', 'yes', 'on'}:
         return True
-    if normalized in {'0', 'false', 'no', 'off'}:
+    if normalized in {'0', 'false', 'no', 'off', 'release'}:
         return False
 
     logger.warning("Invalid boolean for %s=%r; using default %s", name, value, default)
@@ -142,6 +142,7 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 # --- 1. CORE SECURITY ---
 DEBUG = env_bool('DEBUG', default=False)
+IS_PRODUCTION = DEPLOY_MODE == 'cloud'
 
 SECRET_KEY = os.environ.get(
     'DJANGO_SECRET_KEY',
@@ -154,7 +155,7 @@ if not SECRET_KEY:
 env_hosts = os.environ.get('ALLOWED_HOSTS', '').split(',')
 default_hosts = ['localhost', '127.0.0.1', '0.0.0.0', 'backend', 'rag-backend']
 ALLOWED_HOSTS = list(set(host.strip() for host in env_hosts if host) | set(default_hosts))
-if not DEBUG and not any(host.strip() for host in env_hosts):
+if IS_PRODUCTION and not any(host.strip() for host in env_hosts):
     raise ValueError("ALLOWED_HOSTS must be explicitly configured in production.")
 
 # --- 2. APPLICATION DEFINITION ---
@@ -224,7 +225,7 @@ if USE_SQLITE_FOR_TESTS:
     }
 else:
     _pg_password = os.environ.get('POSTGRES_PASSWORD') or get_secret('POSTGRES_PASSWORD')
-    if not _pg_password and not DEBUG:
+    if not _pg_password and IS_PRODUCTION:
         raise ValueError("POSTGRES_PASSWORD must be set via env var or vault in production.")
 
     DATABASES = {
@@ -268,7 +269,7 @@ AZURE_SEARCH_KEY = _azure_search_key
 AZURE_SEARCH_INDEX = os.environ.get('AZURE_SEARCH_INDEX', 'verirag-documents')
 
 # Validate Azure services configuration
-if not DEBUG:
+if IS_PRODUCTION:
     missing_azure = []
     if not AZURE_OPENAI_ENDPOINT:
         missing_azure.append('AZURE_OPENAI_ENDPOINT')
@@ -375,7 +376,7 @@ SPECTACULAR_SETTINGS = {
 # --- 5. NETWORKING (CORS & CSP) ---
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 
-if not DEBUG:
+if IS_PRODUCTION:
     CORS_ALLOWED_ORIGINS = [
         host.strip() for host in os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',') if host
     ]
@@ -397,7 +398,7 @@ CONTENT_SECURITY_POLICY = {
     }
 }
 
-if not DEBUG:
+if IS_PRODUCTION:
     SECURE_SSL_REDIRECT = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_HSTS_SECONDS = 31536000

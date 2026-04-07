@@ -4,41 +4,47 @@
 ###############################################################################
 
 # ── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM python:3.11-slim-bookworm AS builder
+FROM python:3.12-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /build
 
-# Security: Upgrade all OS packages to latest patched versions, then install build deps
+# Security: Upgrade all OS packages to latest patched versions, install build deps
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 COPY requirements.txt .
-RUN pip install --upgrade pip \
-    && pip install --prefix=/install -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --prefix=/install -r requirements.txt && \
+    find /install -type f -name '*.pyc' -delete && \
+    find /install -type d -name '__pycache__' -delete
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
-FROM python:3.11-slim-bookworm AS runtime
+FROM python:3.12-slim-bookworm AS runtime
 
 LABEL maintainer="Team96 <team96@verirag.dev>" \
       org.opencontainers.image.title="VeriRAG Backend" \
       org.opencontainers.image.description="Django REST API for Cloud-Native RAG" \
+      org.opencontainers.image.version="1.0" \
       org.opencontainers.image.source="https://github.com/VaibhavKumar2005/cloud-native-ai-library-system"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=rag_backend.settings
 
-# Security: Upgrade all OS packages to latest patched versions, then install runtime deps
+# Security: Upgrade all OS packages to latest patched versions with Python 3.12 (more patches)
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local

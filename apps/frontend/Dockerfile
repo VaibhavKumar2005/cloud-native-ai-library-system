@@ -4,15 +4,17 @@
 ###############################################################################
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
-FROM node:22-alpine3.20 AS builder
+FROM node:22-alpine3.21 AS builder
 
 # Security: Upgrade all OS packages to latest patched versions
-RUN apk update && apk upgrade --no-cache
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund && \
+    npm cache clean --force
 
 COPY . .
 
@@ -22,14 +24,19 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
 # ── Stage 2: Serve ──────────────────────────────────────────────────────────
-FROM nginx:1.27-alpine3.20 AS runtime
+FROM nginx:1.27-alpine3.21 AS runtime
 
 # Security: Upgrade all OS packages to latest patched versions
-RUN apk update && apk upgrade --no-cache
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates curl
 
 LABEL maintainer="Team96 <team96@verirag.dev>" \
       org.opencontainers.image.title="VeriRAG Frontend" \
-      org.opencontainers.image.description="React SPA for Cloud-Native RAG"
+      org.opencontainers.image.description="Node.js React SPA with nginx reverse proxy" \
+      org.opencontainers.image.version="1.0"
+
+# Security: Restrict unnecessary packages
+RUN apk del --no-cache apk-tools
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf

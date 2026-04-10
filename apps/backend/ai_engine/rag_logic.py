@@ -14,8 +14,8 @@ from functools import lru_cache
 from openai import AzureOpenAI, OpenAI
 from prometheus_client import Counter, Histogram, Gauge
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import AzureOpenAIEmbeddings
 from ai_engine.models import Document
 
 # Azure Search - optional for local dev, required for cloud
@@ -106,6 +106,7 @@ DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
 DB_NAME = os.environ.get("POSTGRES_DB", "verirag_db")
 
 CONNECTION_STRING = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+COLLECTION_NAME = os.environ.get("PGVECTOR_COLLECTION_NAME", "verirag_documents")
 
 # ============================================================================
 # AZURE CONFIGURATION
@@ -272,6 +273,13 @@ def get_embedding_model():
     """
     if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
         raise ValueError("Azure OpenAI credentials not configured (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY)")
+
+    try:
+        from langchain_openai import AzureOpenAIEmbeddings
+    except ImportError as exc:
+        raise ImportError(
+            "AzureOpenAIEmbeddings is unavailable. Install compatible langchain_openai/langchain_core versions."
+        ) from exc
     
     return AzureOpenAIEmbeddings(
         model="text-embedding-3-small",
@@ -284,20 +292,14 @@ def get_embedding_model():
 @lru_cache(maxsize=1)
 def get_vector_store():
     """
-    Gets configured Azure AI Search client.
+    Gets the configured PGVector store.
     Cached at module level to reuse connection.
     """
-    if not AZURE_SEARCH_ENDPOINT or not AZURE_SEARCH_KEY:
-        raise ValueError("Azure AI Search credentials not configured")
-    
-    # Use Key-based authentication for simplicity
-    # For production, consider using DefaultAzureCredential
-    search_client = SearchClient(
-        endpoint=AZURE_SEARCH_ENDPOINT,
-        index_name=AZURE_SEARCH_INDEX,
-        credential=AZURE_SEARCH_KEY
+    return PGVector(
+        collection_name=COLLECTION_NAME,
+        connection_string=CONNECTION_STRING,
+        embedding_function=get_embedding_model(),
     )
-    return search_client
 
 
 # ============================================================================

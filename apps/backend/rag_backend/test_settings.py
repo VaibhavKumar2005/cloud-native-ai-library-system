@@ -1,3 +1,9 @@
+import os
+
+os.environ.setdefault('DEPLOY_MODE', 'local')
+os.environ.setdefault('DJANGO_SECRET_KEY', 'test-secret-key')
+os.environ.setdefault('USE_SQLITE_FOR_TESTS', '1')
+
 from .settings import *  # noqa
 
 DEBUG = True

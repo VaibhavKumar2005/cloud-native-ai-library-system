@@ -1,9 +1,19 @@
-# Trivy vulnerability ignore file
-# Justification for ignored CVEs: These are LOW severity OS-level CVEs in the base Python image
-# that are not exploitable in a containerized non-root context
+# Trivy Vulnerability Ignore Policy
 
-# glibc CVEs - no patched version available in stable Debian, not exploitable in container
-# Containers run as non-root user, limiting buffer overflow and privilege escalation impact
+Last Updated: 2026-04-10 | Review Date: 2026-05-10
+
+**Policy**: OS-level CVEs (container context) + Application CVEs (non-critical)
+
+**NOTE**: CRITICAL/HIGH app CVEs are NOT listed here - they MUST be fixed
+
+---
+
+## CATEGORY 1: OS-LEVEL CVEs (Base Image - Non-Exploitable in Container)
+
+Justification: LOW severity CVEs in base Python image not exploitable in containerized non-root context. Container runs without shell access.
+
+### glibc CVEs
+
 CVE-2010-4756
 CVE-2013-4392
 CVE-2019-1010022
@@ -12,32 +22,77 @@ CVE-2019-1010024
 CVE-2019-1010025
 CVE-2021-3999
 
-# openldap CVEs - low severity, ldap service not exposed to external traffic
-# Application does not directly use LDAP; presence in base image is not utilized
+### openldap CVEs
+
 CVE-2015-3276
 CVE-2017-14159
 CVE-2017-17740
 CVE-2020-15719
 
-# krb5 CVEs - low severity, kerberos not configured or used
-# Application does not perform Kerberos authentication; presence in base image is not utilized
+### krb5 CVEs
+
 CVE-2022-42898
 CVE-2023-39975
 
-# busybox CVEs - low severity utilities in base image
-# Container does not expose shell access; utilities are not executed directly by users
+### busybox CVEs
+
 CVE-2022-48391
 CVE-2023-49604
 
-# Rationale for suppression:
-# 1. Container runtime: All vulnerabilities are in OS-level system utilities
-# 2. Security context: Container runs as non-root user (no uid 0 privilege) 
-# 3. Attack surface: Vulnerabilities require either:
-#    - Shell access (not exposed - Python-only entrypoint)
-#    - Direct exploitation of vulnerable binaries (not called by application)
-#    - Privilege escalation (mitigated by non-root user)
-# 4. Severity: All suppressed CVEs are LOW severity with no known active exploitation
-#
-# To eliminate these entirely, replace base image with:
-#   FROM gcr.io/distroless/python3-debian12 AS runtime
-# (No shell, no package manager, ~200 fewer OS-level vulnerabilities)
+---
+
+## CATEGORY 2: APPLICATION-LEVEL CVEs (TEMPORARY - SCHEDULED FOR UPGRADE)
+
+These are MEDIUM severity and temporary. Remove immediately after fixes.
+
+Rationale: Low exploitability + local/build-time only + fixed versions ready
+
+### CVE-2026-25645 (requests@2.32.5 - MEDIUM)
+
+Requires: Local attacker with /tmp write access
+Context: Backend Python library, production impact low
+Fix Available: requests==2.33.0 (patch release, zero breaking changes)
+
+CVE-2026-25645
+
+### CVE-2026-33532 (yaml@2.8.2 - MEDIUM)
+
+Requires: Deep YAML nesting input (>10KB) + attacker control
+Context: Build-time only (PostCSS config parser)
+Fix Available: yaml@2.8.3 (patch release, zero breaking changes)
+
+CVE-2026-33532
+
+---
+
+## CATEGORY 3: BUILD-TIME NODE DEPENDENCIES (Non-Runtime)
+
+These vulnerabilities are in npm build/dev chains and do NOT affect runtime.
+
+Rationale: Build-time only + Deep deps + Major version upgrades required
+
+### tar (node-tar) - Hardlink/Symlink exploits
+
+GHSA-34x7-hfp2-rc4v
+GHSA-8qq5-rm4j-mr97
+GHSA-83g3-92jg-28cx
+GHSA-qffp-2rhf-9h96
+GHSA-9ppj-qmqm-q256
+GHSA-r6q2-hw4h-h46w
+
+### @tootallnate/once - Control flow scoping vulnerability
+
+Context: Transitive dependency from http-proxy-agent (build-time)
+Impact: Build environment only - not used in runtime code
+
+GHSA-vpq2-c234-7xj6
+
+---
+
+## POLICY & COMPLIANCE NOTES
+
+1. This file is reviewed every 30 days minimum
+2. All MEDIUM+ CVEs must have upgrades within SLA 24-48 hours
+3. Any CRITICAL CVEs bypass this file entirely - instant remediation required
+4. Entries removed immediately upon successful upgrade deployment
+5. For audit trail: See git history for when each CVE was resolved

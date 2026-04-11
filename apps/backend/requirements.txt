@@ -1,8 +1,13 @@
 # Core Frameworks
 # Security: Upgraded to patched versions (CVE-2024-* and CVE-2025-* fixes)
+fastapi>=0.104.0  # RAG API framework
+uvicorn[standard]>=0.24.0  # ASGI server
+python-multipart>=0.0.6  # File upload support
+python-dotenv==1.0.1
+
+# Legacy Django (keep for now, will migrate to FastAPI)
 Django>=5.1.7  # Was 5.0.2 - Multiple SQL injection and DoS vulnerabilities fixed
 djangorestframework>=3.15.2  # Was 3.14.0 - XSS via break_long_headers fixed (CVE-2024-#21/#133)
-python-dotenv==1.0.1
 django-cors-headers==4.3.1
 drf-spectacular>=0.27.0  # API documentation (Swagger/OpenAPI)
 gunicorn>=23.0.0  # Was 21.2.0 - HTTP Request Smuggling vulnerabilities fixed (CVE-2024-1135)
@@ -19,6 +24,7 @@ langchain-text-splitters>=0.3.2
 azure-search-documents>=11.4.0  # Azure AI Search vector search
 
 # Database & Vector Store
+faiss-cpu>=1.8.0  # Local vector store for RAG
 psycopg2-binary==2.9.9
 sqlalchemy>=2.0.0  # Required for PostgreSQL ORM
 azure-storage-blob>=12.19.0  # For document storage (alternative to local filesystem)

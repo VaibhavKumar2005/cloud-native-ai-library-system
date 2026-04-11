@@ -37,7 +37,7 @@ ragas>=0.1.0  # LLM-based evaluation metrics (faithfulness, answer_relevancy, co
 datasets>=2.0.0  # Required by RAGAS for dataset handling
 
 # Utilities
-requests==2.32.5
+requests==2.33.0
 pypdf>=5.5.0  # Was 5.1.0 - 15+ DoS CVEs via crafted PDFs fixed
 tiktoken==0.8.0
 numpy==1.26.4

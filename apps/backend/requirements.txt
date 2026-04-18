@@ -42,6 +42,7 @@ pypdf>=5.5.0  # Was 5.1.0 - 15+ DoS CVEs via crafted PDFs fixed
 tiktoken==0.8.0
 numpy==1.26.4
 scikit-learn>=1.3.0  # For semantic similarity scoring
+packaging>=23.0.0  # Required by django-csp
 
 # Observability & Documentation
 django-prometheus

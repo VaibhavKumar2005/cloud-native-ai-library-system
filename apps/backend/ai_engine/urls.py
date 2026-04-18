@@ -8,6 +8,7 @@ from .views import (
     health_check,
     health_check_details,
 )
+from .academic_views import AcademicPaperViewSet
 from .ops_views import (
     cost_metrics_today,
     cost_metrics_week,
@@ -34,6 +35,7 @@ from .ops_views import (
 # The router automatically handles /documents/ for CRUD operations
 router = DefaultRouter()
 router.register(r'documents', DocumentViewSet, basename='document')
+router.register(r'papers', AcademicPaperViewSet, basename='academic-paper')
 
 urlpatterns = [
     path('', include(router.urls)),

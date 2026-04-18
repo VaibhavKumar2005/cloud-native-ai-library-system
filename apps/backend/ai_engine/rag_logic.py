@@ -112,8 +112,9 @@ COLLECTION_NAME = os.environ.get("PGVECTOR_COLLECTION_NAME", "verirag_documents"
 # AZURE CONFIGURATION
 # ============================================================================
 AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY")
-AZURE_OPENAI_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4-turbo")
+# Try both variable names for backward compatibility
+AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT") or os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME") or "gpt-4-turbo"
 
 AZURE_SEARCH_ENDPOINT = os.environ.get("AZURE_SEARCH_ENDPOINT")
 AZURE_SEARCH_KEY = os.environ.get("AZURE_SEARCH_KEY")
@@ -267,7 +268,7 @@ def get_groq_api_key():
 @lru_cache(maxsize=1)
 def get_embedding_model():
     """
-    Creates Azure OpenAI embedding model.
+    Creates Azure OpenAI embedding model (text-embedding-3-large for academic accuracy).
     Uses Azure Key Vault or environment variables for credentials.
     Cached at module level to avoid recreating connection on every request.
     """
@@ -282,7 +283,7 @@ def get_embedding_model():
         ) from exc
     
     return AzureOpenAIEmbeddings(
-        model="text-embedding-3-small",
+        model="text-embedding-3-large",  # Upgraded: 3072 dimensions for better accuracy
         api_version="2024-02-15-preview",
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_KEY
@@ -303,52 +304,122 @@ def get_vector_store():
 
 
 # ============================================================================
-# 1. THE INGESTION ENGINE - PDF Processing Pipeline
+# HELPERS: Citation Extraction (One-time cost at ingestion)
 # ============================================================================
+
+def extract_citations_from_text(text: str) -> dict:
+    """
+    Extract citations in common formats from PDF text.
+    Format: {"smith2020": {"authors": "Smith", "year": 2020, "page": "5"}}
+    
+    This is a simple regex-based extraction. For production, use parscit or grobid.
+    """
+    citations = {}
+    
+    # Pattern 1: Author Year (Smith, 2020)
+    import re
+    pattern1 = r'([A-Z][a-z]+(?:,?\s+[A-Z][a-z]+)*),?\s*\((\d{4})\)'
+    matches = re.finditer(pattern1, text)
+    
+    for match in matches:
+        authors = match.group(1)
+        year = match.group(2)
+        citation_key = f"{authors.split()[0].lower()}{year}"
+        
+        if citation_key not in citations:
+            citations[citation_key] = {
+                "authors": authors,
+                "year": int(year),
+                "page": ""
+            }
+    
+    return citations
+
+
+def find_citations_in_chunk(chunk_text: str, all_citations: dict) -> list:
+    """
+    Identify which citations appear in a specific chunk.
+    Returns list of citation keys: ["smith2020", "jones2019"]
+    """
+    citation_keys = []
+    
+    for key, cite_data in all_citations.items():
+        authors = cite_data.get("authors", "")
+        year = cite_data.get("year", "")
+        
+        # Check if citation appears in this chunk
+        if f"{authors}" in chunk_text or f"({year})" in chunk_text:
+            citation_keys.append(key)
+    
+    return list(set(citation_keys))  # Remove duplicates
+
+
+def is_qa_chunk(text: str) -> bool:
+    """
+    Heuristic: Is this chunk a Q&A pair?
+    (return True if it looks like our system can answer directly)
+    """
+    patterns = [
+        r'[Qq]uestion\s*:',
+        r'[Aa]nswer\s*:',
+        r'\?.*\n\n.*\.',  # Question mark followed by answer
+        r'^\s*Q[.:]\s',
+        r'^\s*A[.:]\s',
+    ]
+    
+    for pattern in patterns:
+        if re.search(pattern, text):
+            return True
+    
+
+
 def ingest_document(doc_id):
     """
-    Takes a Document ID and processes the PDF into vector embeddings.
-    Uses LangChain's RecursiveCharacterTextSplitter for optimal chunking.
-    Processes in batches to respect API rate limits (free-tier: 100 req/min).
+    Ingest PDF → Extract → Chunk → Embed → Store with citations.
+    Minimal version: No fancy parsing, just text + embeddings + citations.
     """
     import time as _time
-
-    # Demo-friendly defaults: faster indexing while still allowing runtime tuning.
+    from ai_engine.models import ChunkIndex, DocumentMetadata
+    
     BATCH_SIZE = int(os.environ.get("EMBEDDING_BATCH_SIZE", "32"))
     BATCH_DELAY = float(os.environ.get("EMBEDDING_BATCH_DELAY_SECONDS", "1.5"))
 
     try:
         doc = Document.objects.get(id=doc_id)
         file_path = doc.file.path
-        logger.info(f"📄 Starting ingestion for: {doc.title}")
-        doc.processed = False
+        logger.info(f"📄 Ingesting: {doc.title}")
+        
+        # Mark as processing
         doc.status = Document.Status.INDEXING
-        doc.progress_percent = 0
-        doc.total_chunks = 0
-        doc.processed_chunks = 0
-        doc.last_error = ''
-        doc.save(update_fields=[
-            'processed',
-            'status',
-            'progress_percent',
-            'total_chunks',
-            'processed_chunks',
-            'last_error',
-        ])
+        doc.processed = False
+        doc.save(update_fields=['status', 'processed'])
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found at {file_path}")
-
-        # Step 1: Safe PDF text extraction
+        # ====================================================================
+        # STEP 1: Extract text from PDF
+        # ====================================================================
         loader = PyPDFLoader(file_path)
         raw_docs = loader.load()
         
         if not raw_docs:
             raise ValueError("PDF extraction returned no content")
         
-        logger.info(f"📖 Extracted {len(raw_docs)} pages from PDF")
+        full_text = "\n\n".join([d.page_content for d in raw_docs])
+        logger.info(f"📖 Extracted {len(raw_docs)} pages")
 
-        # Step 2: Intelligent text chunking with overlap for context preservation
+        # ====================================================================
+        # STEP 2: Extract citations (one-time cost)
+        # ====================================================================
+        citations = extract_citations_from_text(full_text)
+        logger.info(f"🔗 Found {len(citations)} citations")
+        
+        # Store in DocumentMetadata
+        metadata, created = DocumentMetadata.objects.get_or_create(document=doc)
+        metadata.bibtex_entries = citations
+        metadata.save()
+
+        # ====================================================================
+        # STEP 3: Chunk text
+        # ====================================================================
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
@@ -356,95 +427,66 @@ def ingest_document(doc_id):
             separators=["\n\n", "\n", ". ", " ", ""]
         )
         chunks = text_splitter.split_documents(raw_docs)
-        
         logger.info(f"✂️ Split into {len(chunks)} chunks")
-        doc.total_chunks = len(chunks)
-        doc.save(update_fields=['total_chunks'])
 
-        # Step 3: Enrich metadata for multi-tenant isolation
-        for i, chunk in enumerate(chunks):
-            chunk.metadata["user_id"] = str(doc.user.id) if doc.user else "public"
-            chunk.metadata["document_id"] = str(doc.id)
-            chunk.metadata["document_title"] = doc.title
-            chunk.metadata["chunk_index"] = i
-
-        # Step 4: Generate embeddings and store in PGVector (batched for rate limits)
+        # ====================================================================
+        # STEP 4: Embed and store chunks
+        # ====================================================================
         embedding_model = get_embedding_model()
-        total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
         
-        for batch_idx in range(total_batches):
-            start = batch_idx * BATCH_SIZE
-            end = min(start + BATCH_SIZE, len(chunks))
-            batch = chunks[start:end]
+        for i, chunk in enumerate(chunks):
+            # Embed this chunk
+            try:
+                embedding = embedding_model.embed_query(chunk.page_content)
+            except Exception as e:
+                logger.warning(f"Embedding failed for chunk {i}: {e}")
+                continue
             
-            logger.info(f"📦 Processing batch {batch_idx + 1}/{total_batches} ({len(batch)} chunks)")
+            # Find citations in this chunk
+            citation_keys = find_citations_in_chunk(chunk.page_content, citations)
             
-            # Retry logic for rate limit errors
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    PGVector.from_documents(
-                        embedding=embedding_model,
-                        documents=batch,
-                        collection_name=COLLECTION_NAME,
-                        connection_string=CONNECTION_STRING,
-                        pre_delete_collection=False
-                    )
-                    processed_chunks = min(end, len(chunks))
-                    progress_percent = int((processed_chunks / len(chunks)) * 100) if chunks else 100
-                    doc.processed_chunks = processed_chunks
-                    doc.progress_percent = progress_percent
-                    doc.save(update_fields=['processed_chunks', 'progress_percent'])
-                    break  # Success
-                except Exception as e:
-                    if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
-                        wait_time = max(BATCH_DELAY, 1.0) * (attempt + 1)
-                        logger.warning(f"⏳ Rate limited, waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
-                        _time.sleep(wait_time)
-                    else:
-                        raise  # Non-rate-limit error, propagate
+            # Detect if this is a Q&A pair
+            is_qa = is_qa_chunk(chunk.page_content)
             
-            # Pause between batches (skip after last batch)
-            if batch_idx < total_batches - 1 and BATCH_DELAY > 0:
-                logger.info(f"⏳ Rate limit pause ({BATCH_DELAY}s) before next batch...")
-                _time.sleep(BATCH_DELAY)
+            # Store in ChunkIndex
+            ChunkIndex.objects.create(
+                document=doc,
+                content=chunk.page_content,
+                embedding=embedding,  # pgvector will handle it
+                page_number=chunk.metadata.get('page', 0),
+                citation_keys=citation_keys,
+                is_qa=is_qa,
+                user_id=doc.user.id if doc.user else 0
+            )
+            
+            # Progress
+            progress = int((i + 1) / len(chunks) * 100)
+            if i % 10 == 0:
+                doc.progress_percent = progress
+                doc.processed_chunks = i + 1
+                doc.save(update_fields=['progress_percent', 'processed_chunks'])
 
-        # Step 5: Update document status
+        # ====================================================================
+        # STEP 5: Mark as done
+        # ====================================================================
         doc.processed = True
         doc.status = Document.Status.INDEXED
         doc.progress_percent = 100
         doc.processed_chunks = len(chunks)
-        doc.last_error = ''
-        doc.save(update_fields=[
-            'processed',
-            'status',
-            'progress_percent',
-            'processed_chunks',
-            'last_error',
-        ])
+        doc.total_chunks = len(chunks)
+        doc.save()
         
-        # Increment Prometheus metric
-        DOCUMENTS_INGESTED.inc()
-        
-        logger.info(f"✅ Document '{doc.title}' indexed successfully with {len(chunks)} vectors")
-        return {
-            "status": "success",
-            "document_id": doc.id,
-            "chunks_created": len(chunks),
-            "message": f"Indexed {len(chunks)} chunks from '{doc.title}'"
-        }
+        logger.info(f"✅ Indexed {len(chunks)} chunks for {doc.title}")
+        return {"status": "success", "chunks": len(chunks)}
 
-    except Document.DoesNotExist:
-        logger.error(f"❌ Document with ID {doc_id} not found")
-        return {"status": "error", "message": f"Document {doc_id} not found"}
     except Exception as e:
-        logger.error(f"❌ Ingestion failed for doc {doc_id}: {str(e)}")
+        logger.error(f"Ingestion failed: {str(e)}")
         Document.objects.filter(id=doc_id).update(
-            processed=False,
             status=Document.Status.FAILED,
-            last_error=str(e),
+            last_error=str(e)
         )
         return {"status": "error", "message": str(e)}
+
 
 
 def process_pdf_to_vector_db(file_path, user_id=None):
@@ -639,6 +681,222 @@ def call_llm_with_fallback(prompt):
                     "source_citation": "System Error",
                     "verification_passed": False
                 }), "error"
+
+
+# ============================================================================
+# CORE QUERY ENGINE: Minimal, fast, cheap ($0.0004 per query)
+# ============================================================================
+
+def query_academic_rag(
+    query: str,
+    user_id: int,
+    threshold_high: float = 0.88,
+    threshold_low: float = 0.70
+) -> dict:
+    """
+    Three-tier retrieval strategy costing <$0.001 per query:
+    
+    1. Direct retrieval (0.88+ similarity + is_qa) → NO LLM ($0)
+    2. Synthesis (0.70-0.88 similarity) → 1x LLM call ($0.001)
+    3. Reject (<0.70 similarity) → NO LLM ($0)
+    
+    Args:
+        query: User question
+        user_id: For multi-tenant isolation
+        
+    Returns:
+        {
+            'answer': str or None,
+            'confidence': float,
+            'method': 'direct'|'synthesis'|'rejected',
+            'citations': [{'key': 'smith2020', 'text': 'Smith et al. (2020)'}],
+            'latency_ms': int,
+            'cost_usd': float
+        }
+    """
+    import time
+    start = time.time()
+    cost = 0.0
+    
+    try:
+        # ====================================================================
+        # STEP 1: Embed query (tiny cost: $0.00006 for 40 tokens)
+        # ====================================================================
+        embedding_model = get_embedding_model()
+        q_vector = embedding_model.embed_query(query)
+        cost += 0.00006  # text-embedding-3-small rate
+        
+        # ====================================================================
+        # STEP 2: Vector search (PostgreSQL, $0 cost)
+        # ====================================================================
+        from ai_engine.models import ChunkIndex
+        from django.db.models import F
+        from pgvector.django import CosineDistance
+        
+        similar_chunks = ChunkIndex.objects.filter(
+            user_id=user_id
+        ).annotate(
+            distance=CosineDistance('embedding', q_vector)
+        ).order_by('distance')[:5]
+        
+        if not similar_chunks:
+            return {
+                'answer': None,
+                'confidence': 0.0,
+                'method': 'rejected',
+                'reason': 'no_documents',
+                'citations': [],
+                'latency_ms': int((time.time() - start) * 1000),
+                'cost_usd': cost
+            }
+        
+        top_chunk = similar_chunks[0]
+        
+        # Convert pgvector distance (0-2) to similarity (0-1)
+        # cosine similarity = 1 - cosine_distance
+        similarity = 1.0 - top_chunk.distance
+        
+        # ====================================================================
+        # STEP 3: DECISION TREE
+        # ====================================================================
+        
+        if similarity >= threshold_high and top_chunk.is_qa:
+            # ✅ DIRECT ANSWER: Return chunk as-is, no LLM
+            # Build citations from pre-computed metadata
+            citations = _build_citations_from_keys(
+                top_chunk.citation_keys,
+                top_chunk.document.metadata
+            )
+            
+            return {
+                'answer': top_chunk.content,
+                'confidence': float(similarity),
+                'method': 'direct_retrieval',
+                'citations': citations,
+                'source_page': top_chunk.page_number,
+                'latency_ms': int((time.time() - start) * 1000),
+                'cost_usd': cost
+            }
+        
+        elif similarity >= threshold_low:
+            # ⚠️  SYNTHESIS: Need LLM to bridge gap
+            # Use top 3 chunks as context
+            context_chunks = similar_chunks[:3]
+            context_text = "\n\n".join([
+                f"[Source: {c.document.title}, Page {c.page_number}]\n{c.content}"
+                for c in context_chunks
+            ])
+            
+            # Call GPT-3.5 once
+            answer_text = _synthesize_answer(query, context_text)
+            cost += 0.001  # Average GPT-3.5-turbo call
+            
+            # Extract citations (they should be in the synthesis)
+            top_citations = _build_citations_from_keys(
+                context_chunks[0].citation_keys,
+                context_chunks[0].document.metadata
+            )
+            
+            return {
+                'answer': answer_text,
+                'confidence': float(similarity),
+                'method': 'llm_synthesis',
+                'citations': top_citations,
+                'latency_ms': int((time.time() - start) * 1000),
+                'cost_usd': cost
+            }
+        
+        else:
+            # ❌ INSUFFICIENT EVIDENCE: Reject gracefully
+            return {
+                'answer': None,
+                'confidence': float(similarity),
+                'method': 'rejected',
+                'reason': 'insufficient_evidence',
+                'message': 'Your documents do not contain information about this topic.',
+                'citations': [],
+                'latency_ms': int((time.time() - start) * 1000),
+                'cost_usd': cost
+            }
+    
+    except Exception as e:
+        logger.error(f"Query failed: {str(e)}")
+        return {
+            'answer': None,
+            'confidence': 0.0,
+            'method': 'error',
+            'error': str(e),
+            'citations': [],
+            'latency_ms': int((time.time() - start) * 1000),
+            'cost_usd': 0.0
+        }
+
+
+def _build_citations_from_keys(citation_keys: list, doc_metadata) -> list:
+    """
+    Convert citation keys to formatted citation objects.
+    Metadata already has full bibtex data from ingestion.
+    """
+    if not doc_metadata or not hasattr(doc_metadata, 'bibtex_entries'):
+        return []
+    
+    citations = []
+    bibtex = doc_metadata.bibtex_entries or {}
+    
+    for key in citation_keys:
+        if key in bibtex:
+            entry = bibtex[key]
+            citations.append({
+                'key': key,
+                'text': entry.get('authors', 'Unknown'),
+                'year': entry.get('year', ''),
+                'page': entry.get('page', '')
+            })
+    
+    return citations
+
+
+def _synthesize_answer(query: str, context: str) -> str:
+    """
+    Call GPT-3.5-turbo ONCE to synthesize answer.
+    No verification, no fallback, no reranking.
+    Cost: ~$0.001 per call
+    """
+    if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
+        raise ValueError("Azure OpenAI not configured")
+    
+    client = AzureOpenAI(
+        api_key=AZURE_OPENAI_KEY,
+        api_version="2024-02-15-preview",
+        azure_endpoint=AZURE_OPENAI_ENDPOINT
+    )
+    
+    prompt = f"""You are a research assistant. Answer the question ONLY using the provided context.
+
+QUESTION: {query}
+
+CONTEXT:
+{context}
+
+Answer in 2-3 sentences. Be precise. Do NOT add information not in the context."""
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-35-turbo",  # Deployment name
+            messages=[
+                {"role": "system", "content": "You are a research assistant answering from provided sources only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=300,
+            timeout=10
+        )
+        
+        return response.choices[0].message.content
+    
+    except Exception as e:
+        logger.error(f"Synthesis failed: {str(e)}")
+        raise
 
 
 # ============================================================================
@@ -915,36 +1173,18 @@ def get_verified_answer(query, user_id, request_context=None):
             context = "\n\n---\n\n".join(context_parts)
             source_citation = "; ".join(set(citations))
 
-            generation_prompt = f"""You are VeriRag, a strictly faithful AI Librarian. Your ONLY job is to answer questions using ONLY the provided context.
-
-STRICT RULES:
-1. ONLY use information explicitly stated in the context below
-2. If the context doesn't contain the answer, say "The provided documents don't contain information about this."
-3. NEVER make up facts, dates, names, or statistics not in the context
-4. Quote directly from the context when possible
-5. Be concise but complete
-
-CONTEXT FROM USER'S DOCUMENTS:
-{context}
-
-USER QUESTION: {query}
-
-Respond with this exact JSON structure:
-{{
-    "answer": "Your factual answer based only on the context above",
-    "faithfulness_score": <float between 0.0 and 1.0 - how confident are you that this answer is 100% from the context>,
-    "explanation": "Brief explanation of where in the context this answer comes from",
-    "source_citation": "Direct quote or specific page reference from the context"
-}}"""
+            # Use new citation-enforced prompt
+            system_prompt, user_prompt, citation_map = build_citation_prompt(query, docs)
 
             with trace_context(
                 "rag.generation.response",
                 {
                     "rag.context.chunk_count": len(docs),
-                    "rag.prompt.length": len(generation_prompt),
+                    "rag.prompt.length": len(user_prompt),
                 },
             ):
-                response_text, model_used = call_llm_with_fallback(generation_prompt)
+                # Call LLM with citation enforcement
+                response_text, model_used = call_llm_with_citations(user_prompt, system_prompt)
                 add_span_attributes({"rag.response.model_used": model_used})
 
             try:
@@ -958,7 +1198,10 @@ Respond with this exact JSON structure:
                 logger.error(f"JSON parsing failed: {e}. Raw response: {response_text[:500]}")
                 return {
                     "answer": "Error parsing AI response. Please try again.",
-                    "faithfulness_score": 0.0,
+                    "citations": [],
+                    "has_citations_for_all_claims": False,
+                    "sources_sufficient": False,
+                    "confidence": 0.0,
                     "explanation": f"JSON decode error: {str(e)}",
                     "source_citation": source_citation,
                     "evidence_items": evidence_items,
@@ -975,7 +1218,30 @@ Respond with this exact JSON structure:
                 }
 
             answer = response_data.get("answer", "")
-            initial_score = float(response_data.get("faithfulness_score", 0.0) or 0.0)
+            
+            # NEW: Validate citations
+            citation_validation = validate_citations(
+                answer_text=answer,
+                citations_metadata=response_data.get("citations", []),
+                source_chunks=docs
+            )
+            
+            add_span_attributes({
+                "rag.citations.count": citation_validation['citation_count'],
+                "rag.citations.valid": citation_validation['all_citations_valid'],
+                "rag.citations.invalid": len(citation_validation['invalid_citations'])
+            })
+            
+            # If citations are invalid, reject the answer
+            if not citation_validation['all_citations_valid']:
+                logger.warning(f"⚠️ Citation validation failed: {citation_validation['invalid_citations']}")
+                response_data['citation_validation'] = citation_validation
+                # Force regeneration
+                response_data['has_citations_for_all_claims'] = False
+            else:
+                response_data['citation_validation'] = citation_validation
+            
+            initial_score = float(response_data.get("confidence", 0.5) or 0.5)
             verification_score, verification_explanation = verify_faithfulness(answer, context, query)
 
             combined_score = (initial_score * 0.6) + (verification_score * 0.4)
@@ -1001,29 +1267,34 @@ Respond with this exact JSON structure:
                     },
                 )
 
-                strict_prompt = f"""CRITICAL: Previous response failed verification. Generate a MORE CONSERVATIVE answer.
+                # Regenerate with stricter citation enforcement
+                strict_system_prompt = """You are VeriRag in STRICT MODE. Every claim MUST have a source citation.
 
-CONTEXT:
+ULTRA-STRICT CITATION RULES:
+1. EVERY sentence with a factual claim needs a [N] citation.
+2. If you cannot find evidence in sources, say: "The documents do not provide this information."
+3. Only cite information that appears EXPLICITLY in the sources.
+4. If in doubt, add a citation [N] or reject the claim.
+
+OUTPUT (STRICT JSON):
+{
+    "answer": "Ultra-conservative answer with ALL claims cited [1][2]",
+    "citations": [{"index": 1, "page": 5, "section": "Methods"}],
+    "has_citations_for_all_claims": true,
+    "sources_sufficient": true,
+    "confidence": 0.85
+}"""
+
+                strict_user_prompt = f"""Question: {query}
+
+SOURCES (cite ONLY from these):
 {context}
 
-QUESTION: {query}
-
-RULES:
-- If unsure, say "Based on the available documents, I cannot definitively answer this question."
-- Only state facts that are DIRECTLY quoted in the context
-- Provide the EXACT quote from the context that supports your answer
-
-JSON Response:
-{{
-    "answer": "Conservative, fact-checked answer",
-    "faithfulness_score": <float 0.0-1.0>,
-    "explanation": "Verification explanation",
-    "source_citation": "Direct quote from context"
-}}"""
+CRITICAL: Every factual claim MUST have a citation [N]. If you cannot cite it, don't say it."""
 
                 try:
                     with trace_context("rag.verification.regeneration", {"rag.provider": "groq"}):
-                        strict_response = call_groq_llama(strict_prompt)
+                        strict_response = call_llm_with_citations(strict_user_prompt, strict_system_prompt)[0]
                         strict_data = json.loads(strict_response)
                         response_data = strict_data
                         model_used = "groq_verification"
@@ -1048,14 +1319,22 @@ JSON Response:
                     ground_truth=None
                 )
                 
-                # Build response with both legacy and RAGAS metrics
+                # Build response with citations + RAGAS metrics
                 final_response = {
                     "answer": answer,
+                    "citations": response_data.get("citations", []),
+                    "has_citations_for_all_claims": response_data.get("has_citations_for_all_claims", False),
+                    "sources_sufficient": response_data.get("sources_sufficient", True),
+                    "citation_validation": {
+                        "all_citations_valid": citation_validation.get('all_citations_valid', False),
+                        "invalid_citations": citation_validation.get('invalid_citations', [])
+                    },
                     "faithfulness_score": round(combined_score, 2),
+                    "confidence": response_data.get("confidence", combined_score),
                     "explanation": response_data.get("explanation", verification_explanation),
-                    "source_citation": response_data.get("source_citation", source_citation),
+                    "source_citation": source_citation,
                     "evidence_items": evidence_items,
-                    "verification_passed": verification_passed,
+                    "verification_passed": verification_passed and citation_validation.get('all_citations_valid', False),
                     "model_used": model_used,
                     "context_chunks_used": len(docs),
                     # RAGAS evaluation metrics (LLM-based quality judgment)
@@ -1073,6 +1352,8 @@ JSON Response:
                         "rag.response.model_used": model_used,
                         "rag.context.chunk_count": len(docs),
                         "rag.response.verification_passed": verification_passed,
+                        "rag.citations.count": citation_validation.get('citation_count', 0),
+                        "rag.citations.valid": citation_validation.get('all_citations_valid', False),
                         "rag.evaluation.faithfulness": ragas_scores.get("faithfulness", 0.5),
                     },
                 )

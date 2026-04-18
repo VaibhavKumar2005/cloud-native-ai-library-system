@@ -230,3 +230,257 @@ class EmailLoginToken(models.Model):
 
     def __str__(self):
         return f'Email token for {self.email}'
+
+
+# ============================================================================
+# RESEARCH-GRADE RAG: Citation-Aware Document & Chunk Models
+# ============================================================================
+
+class DocumentMetadata(models.Model):
+    """
+    Minimal academic metadata. Extracted during ingestion.
+    Keep only what impacts retrieval and citation accuracy.
+    """
+    document = models.OneToOneField(
+        Document, 
+        on_delete=models.CASCADE, 
+        related_name='metadata'
+    )
+    
+    # Citation tracking (CRITICAL for $97 budget)
+    # Format: {"smith2020": {"authors": "Smith et al.", "year": 2020, "page": 5}, ...}
+    bibtex_entries = models.JSONField(
+        default=dict, 
+        help_text="BibTeX entries indexed by citation key"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Metadata: {self.document.title}"
+
+
+class ChunkIndex(models.Model):
+    """
+    Minimal chunk storage: content + embedding + citations.
+    Cost-optimized: No fancy metadata, no dual indexing, no versioning.
+    """
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name='chunks'
+    )
+    
+    # Core: Text and embedding
+    content = models.TextField()
+    embedding = models.BinaryField(null=True, blank=True)  # pgvector stores as binary
+    
+    # Minimal structural metadata
+    page_number = models.IntegerField(default=0)
+    
+    # CRITICAL: Can we return this directly without LLM?
+    is_qa = models.BooleanField(
+        default=False,
+        help_text="True if this chunk looks like Q&A pair - can return directly"
+    )
+    
+    # CRITICAL: Pre-computed citations (format: ["smith2020", "jones2019"])
+    citation_keys = models.JSONField(
+        default=list,
+        help_text="List of BibTeX keys cited in this chunk"
+    )
+    
+    # Multi-tenant isolation
+    user_id = models.IntegerField(db_index=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['user_id', 'document']),
+            models.Index(fields=['user_id', 'is_qa']),
+        ]
+    
+    def __str__(self):
+        return f"Chunk(doc={self.document.id}, page={self.page_number}, qa={self.is_qa})"
+
+
+class QueryLog(models.Model):
+    """
+    Minimal query logging for cost tracking and debugging.
+    Usage: Monitor LLM spend and latency.
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='query_logs')
+    
+    # What happened
+    query_text = models.TextField()
+    method = models.CharField(
+        max_length=50,
+        choices=[
+            ('direct_retrieval', 'Direct Retrieval'),
+            ('llm_synthesis', 'LLM Synthesis'),
+            ('rejected', 'Rejected'),
+        ]
+    )
+    
+    # Cost tracking (minimal)
+    tokens_used = models.IntegerField(default=0)  # Sum of in + out
+    cost_usd = models.DecimalField(max_digits=8, decimal_places=6, default=0)
+    
+    # Performance
+    latency_ms = models.IntegerField()
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.method}: {self.query_text[:50]}"
+
+
+# ============================================================================
+# ACADEMIC PAPER MODELS - For PhD Student Research Discovery
+# ============================================================================
+
+class AcademicPaper(models.Model):
+    """
+    Represents an academic paper ingested from external sources
+    (Semantic Scholar, arXiv, CrossRef, Google Scholar)
+    """
+    class Source(models.TextChoices):
+        SEMANTIC_SCHOLAR = 'semantic-scholar', 'Semantic Scholar'
+        ARXIV = 'arxiv', 'arXiv'
+        CROSSREF = 'crossref', 'CrossRef'
+        GOOGLE_SCHOLAR = 'google-scholar', 'Google Scholar'
+        MANUAL_UPLOAD = 'manual', 'Manual Upload'
+    
+    # Multi-tenant
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='academic_papers')
+    
+    # Core metadata
+    external_id = models.CharField(max_length=255, unique=True, db_index=True)
+    title = models.CharField(max_length=500)
+    abstract = models.TextField(blank=True)
+    source = models.CharField(max_length=20, choices=Source.choices)
+    
+    # Academic metadata
+    authors = models.JSONField(default=list)  # List of author names
+    publication_year = models.IntegerField(null=True, blank=True)
+    venue = models.CharField(max_length=255, blank=True)  # Conference/Journal name
+    doi = models.CharField(max_length=255, blank=True, db_index=True)
+    
+    # Academic impact
+    citation_count = models.IntegerField(default=0)
+    h_index_contribution = models.IntegerField(default=0)
+    
+    # URLs and links
+    url = models.URLField(blank=True)
+    pdf_url = models.URLField(blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-publication_year', '-citation_count']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', 'source']),
+        ]
+    
+    def __str__(self):
+        return f"{self.title} ({self.publication_year})"
+
+
+class PaperLibrary(models.Model):
+    """
+    User's collection of papers for a research project
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='paper_libraries')
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    papers = models.ManyToManyField(AcademicPaper, related_name='libraries', blank=True)
+    
+    is_favorite = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-is_favorite', '-updated_at']
+    
+    def __str__(self):
+        return f"{self.user.username}'s {self.name}"
+
+
+class ResearchTopic(models.Model):
+    """
+    AI engineering research topic recommendations for PhD students
+    """
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='research_topics')
+    
+    # Topic info
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    relevance_score = models.FloatField(default=0.0)  # 0-100
+    relevance_reason = models.TextField()
+    
+    # Research guidance
+    key_challenges = models.JSONField(default=list)  # List of challenge descriptions
+    skills_needed = models.JSONField(default=list)  # List of required skills
+    related_fields = models.JSONField(default=list)  # Interdisciplinary connections
+    
+    # Trending info
+    papers_count = models.IntegerField(default=0)
+    growth_percentage = models.FloatField(default=0.0)  # Growth in last 12 months
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.title} ({self.relevance_score}% match)"
+
+
+class ResearchGap(models.Model):
+    """
+    Identified research gaps for a given topic
+    """
+    topic = models.ForeignKey(ResearchTopic, on_delete=models.CASCADE, related_name='gaps')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='research_gaps')
+    
+    # Gap info
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    
+    # Potential directions
+    potential_research_directions = models.JSONField(default=list)
+    
+    # Supporting papers
+    supporting_papers = models.ManyToManyField(AcademicPaper, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Gap: {self.title}"
+
+
+class PaperQnA(models.Model):
+    """
+    Questions and answers about specific papers using RAG
+    """
+    paper = models.ForeignKey(AcademicPaper, on_delete=models.CASCADE, related_name='qna')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='paper_qna')
+    
+    question = models.TextField()
+    answer = models.TextField()
+    
+    # Source info
+    sources_cited = models.JSONField(default=list)  # List of quote/page pairs
+    faithfulness_score = models.FloatField(default=0.0)  # 0-1 confidence
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"Q: {self.question[:50]}..." 

@@ -20,10 +20,9 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from prometheus_client import REGISTRY
 from datetime import datetime
 
-from ai_engine.models import Document
+from ai_engine.models import Document, QueryLog
 from ai_engine.serializers import DocumentSerializer
 from ai_engine.tasks import ingest_document_task
-from ai_engine.rag_logic import get_verified_answer
 from ai_engine.costops import get_cost_tracker
 from ai_engine.qualityops import get_quality_gate
 from ai_engine.promptops import get_prompt_ops
@@ -109,56 +108,45 @@ class DocumentViewSet(viewsets.ModelViewSet):
 @permission_classes([IsAuthenticated])
 @drf_throttle_classes([QueryUserRateThrottle])
 def query_llm(request):
-    """Main RAG query endpoint with verification protocol."""
+    """
+    Minimal RAG query endpoint - $97 budget version.
+    Direct retrieval or single LLM synthesis, no fancy ops.
+    """
+    from ai_engine.rag_logic import query_academic_rag
+    from ai_engine.models import QueryLog
+    
     user_query = request.data.get('query')
     
     if not user_query or len(user_query) > 2000:
         return Response({"error": "Invalid query length"}, status=status.HTTP_400_BAD_REQUEST)
 
-    query_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
-    started_at = time.perf_counter()
-
-    with trace_context(
-        "rag.query.request",
-        {
-            "enduser.id": request.user.id,
-            "rag.query.id": query_id,
-            "rag.query.length": len(user_query),
-            "http.route": request.path,
-        },
-    ):
-        add_span_attributes(
-            {
-                "rag.query.id": query_id,
-                "rag.query.preview": user_query[:120],
-            }
-        )
-        record_event("rag.query.received", {"rag.query.id": query_id})
-        
-        # ===================================================================
-        # OPS INTEGRATION: Get active prompt version for A/B testing
-        # ===================================================================
-        prompt_ops = get_prompt_ops()
-        active_prompt = None
-        try:
-            active_prompt = prompt_ops.get_active_version("rag_query")
-        except Exception as e:
-            logger.debug(f"No active prompt override: {e}")
-        
-        result = get_verified_answer(
-            user_query,
-            user_id=request.user.id,
-            request_context={
-                "query_id": query_id,
-                "request_path": request.path,
-                "trace_id": get_trace_id(),
-            },
+    start_time = time.time()
+    
+    try:
+        # Call simplified RAG engine
+        result = query_academic_rag(
+            query=user_query,
+            user_id=request.user.id
         )
         
-        # ===================================================================
-        # OPS INTEGRATION: Log costs, quality, drift after response
-        # ===================================================================
-        latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        # Log for cost tracking
+        QueryLog.objects.create(
+            user=request.user,
+            query_text=user_query,
+            method=result.get('method', 'error'),
+            tokens_used=result.get('tokens_used', 0),
+            cost_usd=result.get('cost_usd', 0.0),
+            latency_ms=result.get('latency_ms', int((time.time() - start_time) * 1000))
+        )
+        
+        return Response(result)
+    
+    except Exception as e:
+        logger.error(f"Query failed: {str(e)}")
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
         
         # 1. CostOps: Track Azure OpenAI costs
         try:

@@ -96,6 +96,8 @@ services:
       - CELERY_RESULT_BACKEND=redis://rag-redis:6379/0
       - VAULT_ADDR=http://rag-vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-root}
+      - AZURE_OPENAI_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT_NAME}
     depends_on:
       rag-db:
         condition: service_healthy

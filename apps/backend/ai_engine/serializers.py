@@ -1,7 +1,10 @@
 import os
 
 from rest_framework import serializers
-from .models import Document
+from .models import (
+    Document, AcademicPaper, PaperLibrary, ResearchTopic, 
+    ResearchGap, PaperQnA
+)
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -53,3 +56,70 @@ class DocumentSerializer(serializers.ModelSerializer):
             'processed_chunks',
             'last_error',
         ]
+
+
+# ============================================================================
+# ACADEMIC PAPER SERIALIZERS
+# ============================================================================
+
+class AcademicPaperSerializer(serializers.ModelSerializer):
+    """Serializer for academic papers from external sources"""
+    class Meta:
+        model = AcademicPaper
+        fields = [
+            'id', 'external_id', 'title', 'abstract', 'authors',
+            'publication_year', 'venue', 'doi', 'url', 'pdf_url',
+            'citation_count', 'source', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class PaperLibrarySerializer(serializers.ModelSerializer):
+    """Serializer for paper collections"""
+    papers = AcademicPaperSerializer(many=True, read_only=True)
+    paper_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = PaperLibrary
+        fields = [
+            'id', 'name', 'description', 'papers', 'paper_count',
+            'is_favorite', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_paper_count(self, obj):
+        return obj.papers.count()
+
+
+class ResearchTopicSerializer(serializers.ModelSerializer):
+    """Serializer for AI engineering research topics"""
+    class Meta:
+        model = ResearchTopic
+        fields = [
+            'id', 'title', 'description', 'relevance_score',
+            'relevance_reason', 'key_challenges', 'skills_needed',
+            'related_fields', 'papers_count', 'growth_percentage'
+        ]
+        read_only_fields = ['id']
+
+
+class ResearchGapSerializer(serializers.ModelSerializer):
+    """Serializer for identified research gaps"""
+    class Meta:
+        model = ResearchGap
+        fields = [
+            'id', 'title', 'description', 'potential_research_directions',
+            'supporting_papers', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class PaperQnASerializer(serializers.ModelSerializer):
+    """Serializer for paper Q&A interactions"""
+    class Meta:
+        model = PaperQnA
+        fields = [
+            'id', 'paper', 'question', 'answer', 'sources_cited',
+            'faithfulness_score', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']

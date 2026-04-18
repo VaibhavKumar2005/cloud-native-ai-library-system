@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Dashboard from './Dashboard';
+import AcademicDashboard from './AcademicDashboard';
 import Monitoring from './Monitoring';
 import Analytics from './Analytics';
 import Login from './Login';
@@ -30,6 +31,13 @@ export default function App() {
             <Dashboard onLogout={handleLogout} />
           </ProtectedRoute>
         } />
+        
+        <Route path="/research" element={
+          <ProtectedRoute>
+            <AcademicDashboard onLogout={handleLogout} />
+          </ProtectedRoute>
+        } />
+        
         <Route path="/app/monitoring" element={
           <ProtectedRoute>
             <Monitoring />

@@ -25,7 +25,7 @@ ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
 # ── Stage 2: Serve ──────────────────────────────────────────────────────────
-FROM nginx:1.29.7 AS runtime
+FROM nginx:1.29.8 AS runtime
 
 # Security: Upgrade all OS packages to latest patched versions
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \

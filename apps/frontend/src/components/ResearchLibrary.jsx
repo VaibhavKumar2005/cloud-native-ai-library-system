@@ -14,24 +14,23 @@ export default function ResearchLibrary() {
   const [qnaResponse, setQnaResponse] = useState('');
 
   useEffect(() => {
+    const fetchLibrary = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/papers/library/?filter=${filter}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+        });
+        if (!response.ok) throw new Error('Failed to fetch library');
+        const data = await response.json();
+        setPapers(data.papers || []);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchLibrary();
   }, [filter]);
-
-  const fetchLibrary = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/papers/library/?filter=${filter}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-      });
-      if (!response.ok) throw new Error('Failed to fetch library');
-      const data = await response.json();
-      setPapers(data.papers || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDelete = async (paperId) => {
     try {

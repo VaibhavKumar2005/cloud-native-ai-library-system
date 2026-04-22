@@ -1,0 +1,75 @@
+version: 2
+updates:
+  # Python dependencies (Django, FastAPI, LangChain, etc.)
+  - package-ecosystem: "pip"
+    directory: "/apps/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "VaibhavKumar2005"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps):"
+      prefix-development: "chore(deps-dev):"
+      include: "scope"
+
+  # Node.js dependencies (React, Vite, Tailwind, etc.)
+  - package-ecosystem: "npm"
+    directory: "/apps/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:30"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "VaibhavKumar2005"
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "chore(deps):"
+      prefix-development: "chore(deps-dev):"
+      include: "scope"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    reviewers:
+      - "VaibhavKumar2005"
+    labels:
+      - "dependencies"
+      - "ci"
+
+  # Docker images
+  - package-ecosystem: "docker"
+    directory: "/apps/backend"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "03:00"
+    reviewers:
+      - "VaibhavKumar2005"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/apps/frontend"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "03:30"
+    reviewers:
+      - "VaibhavKumar2005"
+    labels:
+      - "dependencies"
+      - "docker"

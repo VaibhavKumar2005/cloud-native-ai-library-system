@@ -1,5 +1,12 @@
 # VeriRAG - The Azure-Native AI Librarian
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Status: Active Development](https://img.shields.io/badge/status-active%20development-brightgreen)](https://github.com/VaibhavKumar2005/cloud-native-ai-library-system)
+[![Python: 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
+[![Node.js: 18+](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org/)
+[![Security: Policy](https://img.shields.io/badge/Security-Policy.md-blue)](.github/SECURITY.md)
+[![Commits: Monthly](https://img.shields.io/badge/commits-28%2Fmonth-blueviolet)](https://github.com/VaibhavKumar2005/cloud-native-ai-library-system/commits)
+
 > **A cloud-native RAG platform delivering trustworthy, citation-backed answers with dual-agent verification, academic research discovery, and automatic LLM failover.**
 
 VeriRAG is an intelligent document library system that ingests PDFs and answers user questions with **verified, citation-backed responses**. The system scores each AI-generated answer for faithfulness and automatically regenerates responses using a backup LLM if verification fails. Includes dedicated **academic paper discovery** for PhD research with integration to Semantic Scholar, arXiv, and CrossRef.

@@ -66,8 +66,15 @@ def handle_graceful_shutdown(signum, frame):
 
 
 # Register signal handler
-signal.signal(signal.SIGTERM, handle_graceful_shutdown)
-signal.signal(signal.SIGINT, handle_graceful_shutdown)  # Also handle Ctrl+C
-
-logger.debug("✓ Graceful shutdown handler registered for SIGTERM/SIGINT")
+try:
+    # Signal handlers only work in main thread on Windows
+    import threading
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, handle_graceful_shutdown)
+        signal.signal(signal.SIGINT, handle_graceful_shutdown)  # Also handle Ctrl+C
+        logger.debug("✓ Graceful shutdown handler registered for SIGTERM/SIGINT")
+    else:
+        logger.debug("⚠ Signal handler skipped (not in main thread)")
+except (ValueError, OSError) as e:
+    logger.debug(f"⚠ Signal handler registration failed (likely Windows in dev): {e}")
 

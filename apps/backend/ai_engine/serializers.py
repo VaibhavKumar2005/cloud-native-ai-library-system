@@ -123,3 +123,23 @@ class PaperQnASerializer(serializers.ModelSerializer):
             'faithfulness_score', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+
+# ============================================================================
+# RAG QUERY SERIALIZERS
+# ============================================================================
+
+class AcademicRAGQuerySerializer(serializers.Serializer):
+    """Serializer for academic RAG queries with optional session papers"""
+    query = serializers.CharField(max_length=2000, required=True)
+    session_paper_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        default=[]
+    )
+    
+    def validate_query(self, value):
+        """Validate query is not empty"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Query cannot be empty.")
+        return value

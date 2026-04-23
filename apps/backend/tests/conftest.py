@@ -132,35 +132,25 @@ def mock_vault_unreachable():
 @pytest.fixture
 def mock_gemini():
     """Mock Azure OpenAI API responses (the actual primary LLM, not Google Gemini)."""
-    with patch("ai_engine.rag_logic.AzureOpenAI") as MockAzureOpenAI:
-        mock_client = MockAzureOpenAI.return_value
-        mock_choice = MagicMock()
-        mock_choice.message.content = '{"answer": "Test answer from Azure OpenAI", "faithfulness_score": 0.85, "explanation": "Found in context", "source_citation": "Page 3"}'
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_client.chat.completions.create.return_value = mock_response
-        yield mock_client
+    with patch("ai_engine.rag_logic.call_gemini") as mock_func:
+        mock_func.return_value = '{"answer": "Test answer from Azure OpenAI", "faithfulness_score": 0.85}'
+        yield mock_func
 
 
 @pytest.fixture
 def mock_gemini_failing():
     """Mock Azure OpenAI API failure (the actual primary LLM)."""
-    with patch("ai_engine.rag_logic.AzureOpenAI") as MockAzureOpenAI:
-        MockAzureOpenAI.side_effect = Exception("Azure OpenAI quota exceeded")
-        yield MockAzureOpenAI
+    with patch("ai_engine.rag_logic.call_gemini") as mock_func:
+        mock_func.side_effect = Exception("Azure OpenAI quota exceeded")
+        yield mock_func
 
 
 @pytest.fixture
 def mock_groq():
     """Mock Groq/Llama-3 API responses."""
-    with patch("ai_engine.rag_logic.OpenAI") as MockOpenAI:
-        mock_client = MockOpenAI.return_value
-        mock_choice = MagicMock()
-        mock_choice.message.content = '{"answer": "Test answer from Groq", "faithfulness_score": 0.78, "explanation": "Verified from context", "source_citation": "Page 5"}'
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_client.chat.completions.create.return_value = mock_response
-        yield mock_client
+    with patch("ai_engine.rag_logic.call_groq_llama") as mock_func:
+        mock_func.return_value = '{"answer": "Test answer from Groq", "faithfulness_score": 0.78}'
+        yield mock_func
 
 
 # ============================================================================

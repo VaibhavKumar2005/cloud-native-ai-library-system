@@ -360,3 +360,100 @@ def on_document_uploaded(self, document_id: int):
     )
     
     return {'status': 'triggered', 'document_id': document_id}
+
+
+@shared_task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    autoretry_for=(Exception,),
+    retry_backoff=True
+)
+def process_abstract_to_vector_db(self, document_id: int):
+    """
+    Celery task to index a document's abstract/content into pgvector.
+    Lightweight alternative to PDF processing for external papers.
+    
+    Args:
+        document_id: ID of the Document model instance
+        
+    Returns:
+        dict with indexing status
+    """
+    from ai_engine.models import Document, ChunkIndex
+    from langchain_openai import OpenAIEmbeddings
+    
+    logger.info(f"📚 [Task {self.request.id}] Indexing abstract for document {document_id}")
+    
+    try:
+        doc = Document.objects.get(id=document_id)
+        
+        # Get content from abstract/content field
+        content = doc.content or ''
+        if not content:
+            logger.warning(f"No content to index for document {document_id}")
+            doc.status = Document.Status.INDEXED
+            doc.processed = True
+            doc.save()
+            return {'status': 'no_content', 'document_id': document_id}
+        
+        # Initialize embeddings (using existing get_embedding_model if available)
+        try:
+            from ai_engine.rag_logic import get_embedding_model
+            embeddings_obj = get_embedding_model()
+        except ImportError:
+            # Fallback to direct OpenAI
+            embeddings_obj = OpenAIEmbeddings(model="text-embedding-3-small")
+        
+        # Create a single chunk for the abstract
+        embedding = embeddings_obj.embed_query(content)
+        
+        # Store as chunk
+        chunk = ChunkIndex.objects.create(
+            document=doc,
+            content=content,
+            chunk_index=0,
+            embedding=embedding,
+            page_number=0,
+            is_qa=False,  # Abstracts aren't Q&A format
+            citation_keys=[],  # No pre-extracted citations
+            user_id=doc.user_id
+        )
+        
+        # Mark document as processed
+        doc.status = Document.Status.INDEXED
+        doc.processed = True
+        doc.total_chunks = 1
+        doc.processed_chunks = 1
+        doc.save()
+        
+        logger.info(f"✅ Successfully indexed abstract for document {document_id} (chunk: {chunk.id})")
+        
+        return {
+            'status': 'indexed',
+            'document_id': document_id,
+            'chunk_id': chunk.id,
+            'content_length': len(content)
+        }
+    
+    except Document.DoesNotExist:
+        logger.error(f"Document {document_id} not found")
+        return {'status': 'error', 'error': 'Document not found'}
+    
+    except Exception as e:
+        logger.error(f"Abstract indexing failed for document {document_id}: {str(e)}")
+        
+        # Retry with exponential backoff
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e, countdown=min(60, 30 * (2 ** self.request.retries)))
+        else:
+            # Mark as failed after max retries
+            try:
+                doc = Document.objects.get(id=document_id)
+                doc.status = Document.Status.FAILED
+                doc.last_error = str(e)
+                doc.save()
+            except:
+                pass
+            
+            return {'status': 'failed', 'error': str(e)}

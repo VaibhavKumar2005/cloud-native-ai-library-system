@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     DocumentViewSet,
     query_llm,
+    research_query,
     SystemInsightsView,
     process_document,
     health_check,
@@ -40,6 +41,7 @@ router.register(r'papers', AcademicPaperViewSet, basename='academic-paper')
 urlpatterns = [
     path('', include(router.urls)),
     path('query/', query_llm, name='query_llm'),
+    path('research/query/', research_query, name='research_query'),
     path('process-document/', process_document, name='process_document'),
     path('system-insights/', SystemInsightsView.as_view(), name='system-insights'),
     path('health/', health_check, name='health'),

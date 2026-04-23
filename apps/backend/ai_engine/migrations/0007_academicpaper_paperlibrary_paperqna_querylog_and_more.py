@@ -102,14 +102,6 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
             ],
         ),
-        migrations.RemoveField(
-            model_name='queryevaluation',
-            name='document',
-        ),
-        migrations.RemoveField(
-            model_name='queryevaluation',
-            name='user',
-        ),
         migrations.AlterModelOptions(
             name='chunkindex',
             options={},

@@ -240,6 +240,59 @@ def query_llm(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@drf_throttle_classes([QueryUserRateThrottle])
+def research_query(request):
+    """
+    Enhanced RAG query endpoint for research with session paper filtering.
+    Supports pinned papers and external paper suggestions.
+    
+    POST /api/ai/research/query/
+    Body: {
+        "query": "...",
+        "session_paper_ids": [1, 2, 3]  # optional
+    }
+    """
+    from ai_engine.rag_logic import query_academic_rag
+    from ai_engine.serializers import AcademicRAGQuerySerializer
+    
+    serializer = AcademicRAGQuerySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    
+    user_query = serializer.validated_data['query']
+    session_paper_ids = serializer.validated_data.get('session_paper_ids', [])
+    
+    start_time = time.time()
+    
+    try:
+        # Call enhanced RAG engine with session filtering
+        result = query_academic_rag(
+            query=user_query,
+            user_id=request.user.id,
+            session_paper_ids=session_paper_ids if session_paper_ids else None
+        )
+        
+        # Log for cost tracking
+        QueryLog.objects.create(
+            user=request.user,
+            query_text=user_query,
+            method=result.get('method', 'error'),
+            tokens_used=result.get('tokens_used', 0),
+            cost_usd=float(result.get('cost_usd', 0.0)),
+            latency_ms=result.get('latency_ms', int((time.time() - start_time) * 1000))
+        )
+        
+        return Response(result)
+    
+    except Exception as e:
+        logger.error(f"Research query failed: {str(e)}")
+        return Response(
+            {"error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 @drf_throttle_classes([DocumentActionUserRateThrottle])
 def process_document(request):
     """Queue asynchronous processing for an existing uploaded document."""

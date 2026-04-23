@@ -39,6 +39,36 @@ class Document(models.Model):
     # null=True ensures older documents don't crash the database during migration
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='documents', null=True, blank=True)
 
+    # ========================================================================
+    # UNIFIED DOCUMENT SUPPORT: Handle both uploads and external papers
+    # ========================================================================
+    class Source(models.TextChoices):
+        UPLOAD = 'upload', 'User Upload'
+        SEMANTIC_SCHOLAR = 'semantic_scholar', 'Semantic Scholar'
+        ARXIV = 'arxiv', 'arXiv'
+        CROSSREF = 'crossref', 'CrossRef'
+
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.UPLOAD,
+        help_text="Where this document came from"
+    )
+    
+    # For external papers, store the text content (abstract, full text, etc.)
+    content = models.TextField(
+        blank=True,
+        default='',
+        help_text="Text content for external papers (abstract, summary, etc.)"
+    )
+    
+    # Metadata for external papers and source tracking
+    source_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="External metadata: {paper_id, external_url, original_url, authors, year, venue, doi}"
+    )
+
     def __str__(self):
         return self.title
 

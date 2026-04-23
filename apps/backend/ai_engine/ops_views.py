@@ -19,6 +19,7 @@ from .qualityops import get_quality_gate
 from .promptops import get_prompt_ops
 from .evalops import get_eval_ops
 from .driftops import get_drift_ops
+from .permissions import IsAdminUser
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 @cache_page(60)  # Cache for 60 seconds
 def cost_metrics_today(request) -> Response:
     """
@@ -78,7 +79,7 @@ def cost_metrics_today(request) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 @cache_page(300)  # Cache for 5 minutes
 def cost_metrics_week(request) -> Response:
     """Get cost metrics for the past 7 days."""
@@ -107,7 +108,7 @@ def cost_metrics_week(request) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def budget_alert(request) -> Response:
     """
     Check if any budget alerts are active.
@@ -142,7 +143,7 @@ def budget_alert(request) -> Response:
 # ============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 @cache_page(300)  # Cache for 5 minutes
 def quality_metrics_week(request) -> Response:
     """
@@ -188,7 +189,7 @@ def quality_metrics_week(request) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 @cache_page(60)  # Cache for 60 seconds
 def quality_metrics_month(request) -> Response:
     """Get quality metrics for the past 30 days."""
@@ -221,7 +222,7 @@ def quality_metrics_month(request) -> Response:
 # ============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 @cache_page(60)  # Cache for 60 seconds
 def ops_dashboard(request) -> Response:
     """
@@ -291,7 +292,7 @@ def ops_dashboard(request) -> Response:
 # ============================================================================
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def prompt_versions(request, prompt_name: str) -> Response:
     """
     GET: List all versions of a prompt
@@ -336,7 +337,7 @@ def prompt_versions(request, prompt_name: str) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 @cache_page(60)
 def prompt_active(request, prompt_name: str) -> Response:
     """Get the current active prompt version."""
@@ -365,7 +366,7 @@ def prompt_active(request, prompt_name: str) -> Response:
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def prompt_promote(request) -> Response:
     """Promote a prompt version to active."""
     try:
@@ -397,7 +398,7 @@ def prompt_promote(request) -> Response:
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def prompt_ab_tests(request) -> Response:
     """
     GET: List A/B tests
@@ -439,7 +440,7 @@ def prompt_ab_tests(request) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def prompt_ab_results(request, test_id: str) -> Response:
     """Get results of a specific A/B test."""
     try:
@@ -471,7 +472,7 @@ def prompt_ab_results(request, test_id: str) -> Response:
 # ============================================================================
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def eval_datasets(request) -> Response:
     """
     GET: List all test datasets
@@ -528,7 +529,7 @@ def eval_datasets(request) -> Response:
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def eval_runs(request) -> Response:
     """
     GET: List evaluation runs
@@ -574,7 +575,7 @@ def eval_runs(request) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def eval_run_summary(request, run_id: str) -> Response:
     """Get summary of a specific evaluation run."""
     try:
@@ -605,7 +606,7 @@ def eval_run_summary(request, run_id: str) -> Response:
 # ============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 @cache_page(60)
 def drift_summary(request) -> Response:
     """Get drift monitoring summary."""
@@ -627,7 +628,7 @@ def drift_summary(request) -> Response:
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def drift_alerts(request) -> Response:
     """Get recent drift alerts."""
     try:
@@ -664,7 +665,7 @@ def drift_alerts(request) -> Response:
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAdminUser])
 def drift_acknowledge_alert(request, alert_id: str) -> Response:
     """Mark a drift alert as acknowledged."""
     try:
@@ -688,3 +689,4 @@ def drift_acknowledge_alert(request, alert_id: str) -> Response:
             {"status": "error", "message": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+

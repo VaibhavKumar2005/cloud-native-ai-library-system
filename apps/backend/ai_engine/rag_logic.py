@@ -683,6 +683,82 @@ def call_llm_with_fallback(prompt):
                 }), "error"
 
 
+def build_citation_prompt(query: str, docs: list) -> tuple:
+    """
+    Build system and user prompts for citation-grounded generation.
+    
+    Returns:
+        (system_prompt, user_prompt, citation_map)
+    """
+    citation_map = {i: doc.metadata for i, doc in enumerate(docs)}
+    
+    context_blocks = []
+    for i, doc in enumerate(docs):
+        page = doc.metadata.get('page', 'Unknown')
+        title = doc.metadata.get('document_title', 'Document')
+        context_blocks.append(f"[Citation {i}] ({title}, p. {page})\n{doc.page_content}")
+    
+    context = "\n\n---\n\n".join(context_blocks)
+    
+    system_prompt = """You are a research assistant that answers questions based solely on provided documents.
+    
+Rules:
+- cite sources using [Citation N] format
+- only answer if supported by documents
+- return JSON with: {"answer": "...", "citations": [...], "confidence": 0.0-1.0}
+"""
+    
+    user_prompt = f"""Question: {query}
+
+Context:
+{context}
+
+Provide answer grounded in citations."""
+    
+    return system_prompt, user_prompt, citation_map
+
+
+def call_llm_with_citations(user_prompt: str, system_prompt: str) -> tuple:
+    """
+    Call LLM with system and user prompts, returns (response_text, model_used).
+    """
+    combined = system_prompt + "\n\n" + user_prompt
+    return call_llm_with_fallback(combined)
+
+
+def validate_citations(answer_text: str, citations_metadata: list, source_chunks: list) -> dict:
+    """
+    Validate that citations are properly grounded in source chunks.
+    
+    Returns:
+        {
+            'citation_count': int,
+            'all_citations_valid': bool,
+            'invalid_citations': list
+        }
+    """
+    invalid = []
+    
+    for citation in citations_metadata or []:
+        cite_text = citation.get('excerpt', '').lower() if isinstance(citation, dict) else str(citation).lower()
+        
+        # Check if citation text appears in any source chunk
+        found = False
+        for chunk in source_chunks:
+            if cite_text and cite_text in chunk.page_content.lower():
+                found = True
+                break
+        
+        if not found and cite_text:
+            invalid.append(citation)
+    
+    return {
+        'citation_count': len(citations_metadata or []),
+        'all_citations_valid': len(invalid) == 0,
+        'invalid_citations': invalid
+    }
+
+
 # ============================================================================
 # CORE QUERY ENGINE: Minimal, fast, cheap ($0.0004 per query)
 # ============================================================================
@@ -690,6 +766,7 @@ def call_llm_with_fallback(prompt):
 def query_academic_rag(
     query: str,
     user_id: int,
+    session_paper_ids: list = None,
     threshold_high: float = 0.88,
     threshold_low: float = 0.70
 ) -> dict:
@@ -703,6 +780,7 @@ def query_academic_rag(
     Args:
         query: User question
         user_id: For multi-tenant isolation
+        session_paper_ids: Optional list of Document IDs to constrain search
         
     Returns:
         {
@@ -710,6 +788,9 @@ def query_academic_rag(
             'confidence': float,
             'method': 'direct'|'synthesis'|'rejected',
             'citations': [{'key': 'smith2020', 'text': 'Smith et al. (2020)'}],
+            'sources': [{'id', 'title', 'source', 'excerpt'}],  # NEW: source tracking
+            'reason': 'answered' | 'no_evidence' | 'uncertain',
+            'suggested_papers': [...],  # NEW: fallback suggestions
             'latency_ms': int,
             'cost_usd': float
         }
@@ -730,21 +811,38 @@ def query_academic_rag(
         # STEP 2: Vector search (PostgreSQL, $0 cost)
         # ====================================================================
         from ai_engine.models import ChunkIndex
-        from django.db.models import F
+        from django.db.models import F, Q
         from pgvector.django import CosineDistance
         
+        # Filter by session papers if provided
+        filter_query = Q(user_id=user_id)
+        if session_paper_ids:
+            filter_query &= Q(document_id__in=session_paper_ids)
+        
         similar_chunks = ChunkIndex.objects.filter(
-            user_id=user_id
+            filter_query
         ).annotate(
             distance=CosineDistance('embedding', q_vector)
         ).order_by('distance')[:5]
         
         if not similar_chunks:
+            # No chunks found - suggest papers if in no-filter mode
+            suggested = []
+            if not session_paper_ids:
+                # Try to find related papers from Semantic Scholar
+                try:
+                    suggested = _semantic_scholar_search(query, limit=4)
+                except Exception as e:
+                    logger.warning(f"Semantic Scholar lookup failed: {e}")
+            
             return {
                 'answer': None,
                 'confidence': 0.0,
                 'method': 'rejected',
-                'reason': 'no_documents',
+                'reason': 'no_evidence',
+                'message': 'No documents found. ' + ('Try pinning papers to ask about them.' if session_paper_ids else 'Try uploading a relevant paper or searching the database.'),
+                'sources': [],
+                'suggested_papers': suggested,
                 'citations': [],
                 'latency_ms': int((time.time() - start) * 1000),
                 'cost_usd': cost
@@ -768,11 +866,25 @@ def query_academic_rag(
                 top_chunk.document.metadata
             )
             
+            # Build source tracking
+            sources = [
+                {
+                    'id': chunk.document.id,
+                    'title': chunk.document.title,
+                    'source': chunk.document.source,
+                    'score': float(1.0 - chunk.distance),
+                    'excerpt': chunk.content[:200] + '...' if len(chunk.content) > 200 else chunk.content
+                }
+                for chunk in similar_chunks[:3]
+            ]
+            
             return {
                 'answer': top_chunk.content,
                 'confidence': float(similarity),
                 'method': 'direct_retrieval',
+                'reason': 'answered',
                 'citations': citations,
+                'sources': sources,
                 'source_page': top_chunk.page_number,
                 'latency_ms': int((time.time() - start) * 1000),
                 'cost_usd': cost
@@ -797,23 +909,47 @@ def query_academic_rag(
                 context_chunks[0].document.metadata
             )
             
+            # Build source tracking
+            sources = [
+                {
+                    'id': chunk.document.id,
+                    'title': chunk.document.title,
+                    'source': chunk.document.source,
+                    'score': float(1.0 - chunk.distance),
+                    'excerpt': chunk.content[:200] + '...' if len(chunk.content) > 200 else chunk.content
+                }
+                for chunk in context_chunks
+            ]
+            
             return {
                 'answer': answer_text,
                 'confidence': float(similarity),
                 'method': 'llm_synthesis',
+                'reason': 'answered',
                 'citations': top_citations,
+                'sources': sources,
                 'latency_ms': int((time.time() - start) * 1000),
                 'cost_usd': cost
             }
         
         else:
             # ❌ INSUFFICIENT EVIDENCE: Reject gracefully
+            suggested = []
+            if not session_paper_ids:
+                # Try to suggest relevant papers from external sources
+                try:
+                    suggested = _semantic_scholar_search(query, limit=4)
+                except Exception as e:
+                    logger.warning(f"Semantic Scholar lookup failed: {e}")
+            
             return {
                 'answer': None,
                 'confidence': float(similarity),
                 'method': 'rejected',
                 'reason': 'insufficient_evidence',
-                'message': 'Your documents do not contain information about this topic.',
+                'message': 'Your documents do not contain sufficient information about this topic.',
+                'sources': [],
+                'suggested_papers': suggested,
                 'citations': [],
                 'latency_ms': int((time.time() - start) * 1000),
                 'cost_usd': cost
@@ -825,7 +961,10 @@ def query_academic_rag(
             'answer': None,
             'confidence': 0.0,
             'method': 'error',
+            'reason': 'error',
             'error': str(e),
+            'sources': [],
+            'suggested_papers': [],
             'citations': [],
             'latency_ms': int((time.time() - start) * 1000),
             'cost_usd': 0.0
@@ -897,6 +1036,46 @@ Answer in 2-3 sentences. Be precise. Do NOT add information not in the context."
     except Exception as e:
         logger.error(f"Synthesis failed: {str(e)}")
         raise
+
+
+def _semantic_scholar_search(query: str, limit: int = 4) -> list:
+    """
+    Search Semantic Scholar API for papers related to the query.
+    Used as fallback when no local documents match.
+    
+    Returns:
+        [{'title': str, 'authors': list, 'year': int, 'url': str, 'abstract': str}, ...]
+    """
+    try:
+        import requests
+        
+        url = "https://api.semanticscholar.org/graph/v1/paper/search"
+        params = {
+            'query': query,
+            'limit': limit,
+            'fields': 'title,authors,year,url,abstract,externalIds'
+        }
+        
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        papers = []
+        for paper in data.get('data', []):
+            papers.append({
+                'title': paper.get('title', ''),
+                'authors': [a.get('name', '') for a in paper.get('authors', [])],
+                'year': paper.get('year'),
+                'url': paper.get('url', ''),
+                'abstract': paper.get('abstract', ''),
+                'paper_id': paper.get('externalIds', {}).get('ArXiv') or paper.get('paperId', '')
+            })
+        
+        return papers
+    
+    except Exception as e:
+        logger.warning(f"Semantic Scholar search failed for '{query}': {e}")
+        return []
 
 
 # ============================================================================

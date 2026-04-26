@@ -16,11 +16,9 @@ jaraco.context>=6.0.0  # Path traversal via malicious tar archives CVE-2024-6345
 
 # AI & LLM (Azure OpenAI + LangChain + Fallback)
 openai>=1.3.0  # Azure OpenAI + Groq fallback
-langchain==0.1.20  # Fixed version for stability
-langchain-openai==0.1.20  # Azure OpenAI integration for LangChain (synchronized with langchain)
-langchain-community==0.1.20  # Synchronized with langchain
-langchain-core==0.1.52  # Synchronized with langchain
-langchain-text-splitters==0.0.1  # Compatible with langchain 0.1.20
+langchain  # Let pip resolve to compatible version
+langchain-openai  # Auto-resolve with langchain
+langchain-community  # Community integrations
 azure-search-documents>=11.4.0  # Azure AI Search vector search
 
 # Database & Vector Store
@@ -43,6 +41,11 @@ tiktoken==0.8.0
 numpy==1.26.4
 scikit-learn>=1.3.0  # For semantic similarity scoring
 packaging>=23.0.0  # Required by django-csp
+
+# External Data Sources (arXiv, Patents, etc.)
+feedparser>=6.0.0  # Parse arXiv RSS feeds
+beautifulsoup4>=4.12.0  # Web scraping for patent data
+lxml>=4.9.0  # Fast XML parsing
 
 # Observability & Documentation
 django-prometheus

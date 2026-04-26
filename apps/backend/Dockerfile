@@ -22,7 +22,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 
 COPY requirements.txt .
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --prefix=/install -r requirements.txt && \
+    pip install --prefix=/install --ignore-installed -r requirements.txt && \
     find /install -type f -name '*.pyc' -delete && \
     find /install -type d -name '__pycache__' -delete
 

@@ -4,7 +4,6 @@ import Dashboard from './Dashboard';
 import AcademicDashboard from './AcademicDashboard';
 import Monitoring from './Monitoring';
 import Analytics from './Analytics';
-import Login from './Login';
 import GitHubHealthChecker from './GitHubHealthChecker';
 import Research from './pages/Research';
 import { clearSession } from './lib/auth';

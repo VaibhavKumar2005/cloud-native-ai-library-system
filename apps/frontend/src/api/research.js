@@ -3,7 +3,8 @@
  * Handles all API calls for the research interface
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = `${API_ROOT}/api`;
 
 /**
  * Search for academic papers from Semantic Scholar/arXiv
@@ -16,7 +17,6 @@ export async function searchAcademicPapers(query, limit = 10) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify({
           query: query,
@@ -44,12 +44,11 @@ export async function searchAcademicPapers(query, limit = 10) {
 export async function queryAcademicRAG(query, sessionPaperIds = []) {
   try {
     const response = await fetch(
-      `${API_BASE}/research/query/`,
+      `${API_ROOT}/query`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify({
           query,
@@ -80,7 +79,6 @@ export async function ingestAcademicPaper(paperData) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
         body: JSON.stringify(paperData)
       }
@@ -108,7 +106,6 @@ export async function getMyLibrary() {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         }
       }
     );
@@ -136,7 +133,6 @@ export async function searchLocalDocuments(query) {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         }
       }
     );
@@ -166,9 +162,6 @@ export async function uploadDocument(file) {
       `${API_BASE}/documents/`,
       {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
         body: formData
       }
     );

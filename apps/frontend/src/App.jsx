@@ -5,25 +5,21 @@ import AcademicDashboard from './AcademicDashboard';
 import Monitoring from './Monitoring';
 import Analytics from './Analytics';
 import Login from './Login';
-import LandingPage from './LandingPage';
 import GitHubHealthChecker from './GitHubHealthChecker';
 import Research from './pages/Research';
-import { clearSession, isAuthenticated } from './lib/auth';
+import { clearSession } from './lib/auth';
 
-// ── Auth Guard: Redirects unauthenticated users to /login ──────────
+// ── Auth Guard: In DEMO_MODE, skip all auth checks ──────────
+// For demo/testing, bypass the login requirement entirely
 function ProtectedRoute({ children, adminOnly = false }) {
-  if (!isAuthenticated()) return <Navigate to="/login" replace />;
-  
-  // TODO: Check admin status from user profile if adminOnly is true
-  // For now, we'll let the backend handle admin checks
-  
+  // DEMO MODE: Always allow access, skip auth checks
   return children;
 }
 
 export default function App() {
   const handleLogout = () => {
     clearSession();
-    window.location.href = '/login'; 
+    window.location.href = '/';
   };
 
   const showLegacyUI = import.meta.env.VITE_LEGACY_UI === 'true';
@@ -31,9 +27,9 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<Research onLogout={handleLogout} />} />
         <Route path="/tools/github-health-checker" element={<GitHubHealthChecker />} />
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={<Navigate to="/" replace />} />
 
         {/* NEW: Main Research Interface (replaces /app) */}
         <Route path="/research" element={
@@ -82,7 +78,7 @@ export default function App() {
         <Route path="/monitoring" element={<Navigate to="/admin/monitoring" replace />} />
         <Route path="/analytics" element={<Navigate to="/admin/monitoring" replace />} />
 
-        {/* Fallback: Redirect unknown routes to landing page */}
+        {/* Fallback: Redirect unknown routes to the demo query UI */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

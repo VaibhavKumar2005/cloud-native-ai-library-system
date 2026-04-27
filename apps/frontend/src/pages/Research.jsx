@@ -8,7 +8,7 @@ import '../styles/Components.css';
 
 export default function Research() {
   const [query, setQuery] = useState('');
-  const [scope, setScope] = useState('both'); // 'local' | 'all' | 'both'
+  const [scope, setScope] = useState('local'); // 'local' | 'all' | 'both'
   const [results, setResults] = useState([]);
   const [pinned, setPinned] = useState([]);
   const [answer, setAnswer] = useState(null);
@@ -16,10 +16,30 @@ export default function Research() {
   const [filters, setFilters] = useState({ topic: '', year: null });
   const [hasSearched, setHasSearched] = useState(false);
 
-  // Search papers (academic + local)
+  // Ask the public RAG endpoint. Pinned papers are ignored in demo mode.
+  const handleAsk = useCallback(async () => {
+    if (!query.trim()) return;
+    
+    setLoading(true);
+    try {
+      const response = await queryAcademicRAG(query, pinned.map(p => p.id));
+      setAnswer(response);
+    } finally {
+      setLoading(false);
+    }
+  }, [query, pinned]);
+
+  // Demo path: ask the RAG API directly from the main search box.
   const handleSearch = useCallback(async (e) => {
     if (e.key !== 'Enter' || !query.trim()) return;
-    
+
+    await handleAsk();
+  }, [query, handleAsk]);
+
+  // Search papers (academic + local)
+  const handlePaperSearch = useCallback(async () => {
+    if (!query.trim()) return;
+
     setLoading(true);
     setHasSearched(true);
     try {
@@ -57,19 +77,6 @@ export default function Research() {
     }
   }, [query, scope, filters]);
 
-  // Ask about pinned papers
-  const handleAsk = useCallback(async () => {
-    if (!query.trim() || pinned.length === 0) return;
-    
-    setLoading(true);
-    try {
-      const response = await queryAcademicRAG(query, pinned.map(p => p.id));
-      setAnswer(response);
-    } finally {
-      setLoading(false);
-    }
-  }, [query, pinned]);
-
   const togglePin = (paper) => {
     setPinned(prev =>
       prev.find(p => p.id === paper.id)
@@ -93,6 +100,13 @@ export default function Research() {
               placeholder="What research question are you exploring?"
               className="search-input"
             />
+            <button
+              onClick={handleAsk}
+              disabled={loading || !query.trim()}
+              className="ask-button"
+            >
+              {loading ? 'Thinking...' : 'Ask RAG'}
+            </button>
           </div>
           
           <div className="search-controls">
@@ -116,6 +130,13 @@ export default function Research() {
               onChange={(e) => setFilters({ ...filters, topic: e.target.value })}
               className="filter-input"
             />
+            <button
+              onClick={handlePaperSearch}
+              disabled={loading || !query.trim()}
+              className="scope-btn"
+            >
+              Search papers
+            </button>
           </div>
         </div>
       </div>
@@ -150,31 +171,15 @@ export default function Research() {
 
         {/* Right: Answer panel */}
         <div className="answer-column">
-          {pinned.length === 0 ? (
+          {answer ? (
+            <AnswerPanel answer={answer} />
+          ) : (
             <div className="empty-answer-panel">
-              <p className="empty-text">📌 Pin papers to ask questions</p>
+              <p className="empty-text">Ask a question to run the RAG pipeline</p>
               <p className="empty-hint">
-                Click the pin icon on papers you want to cite in your answer.
+                The system will answer with sources or reject when evidence is missing.
               </p>
             </div>
-          ) : (
-            <>
-              <button
-                onClick={handleAsk}
-                disabled={loading || !query.trim()}
-                className="ask-button"
-              >
-                {loading ? '⏳ Thinking...' : '✨ Ask about pinned papers'}
-              </button>
-              
-              {answer ? (
-                <AnswerPanel answer={answer} />
-              ) : (
-                <div className="empty-answer">
-                  <p>Ask a question about your pinned papers.</p>
-                </div>
-              )}
-            </>
           )}
         </div>
       </div>

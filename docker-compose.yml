@@ -90,6 +90,7 @@ services:
     environment:
       - DJANGO_SETTINGS_MODULE=rag_backend.settings
       - DEBUG=True
+      - DEMO_MODE=true
       - POSTGRES_HOST=rag-db
       - REDIS_URL=redis://rag-redis:6379/0
       - CELERY_BROKER_URL=redis://rag-redis:6379/0
@@ -180,6 +181,7 @@ services:
       context: ./apps/frontend
       args:
         VITE_API_URL: http://localhost:8000
+        VITE_DEMO_MODE: "true"
     container_name: rag-frontend
     ports:
       - "5173:8080"

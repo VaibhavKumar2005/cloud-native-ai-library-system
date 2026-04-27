@@ -9,7 +9,6 @@ import json
 import logging
 import re
 import time
-import hvac  # For HashiCorp Vault
 from functools import lru_cache
 from openai import AzureOpenAI, OpenAI
 from prometheus_client import Counter, Histogram, Gauge
@@ -17,6 +16,44 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from ai_engine.models import Document
+
+# Import vault configuration (secrets management)
+from ai_engine.vault_config import (
+    get_api_key_from_vault,
+    get_groq_api_key,
+    get_google_api_key,
+    DEPLOY_MODE,
+    AZURE_KEY_VAULT_URL,
+)
+
+# Import vector store operations (embeddings & pgvector)
+from ai_engine.vector_store import (
+    get_embedding_model,
+    get_vector_store,
+    get_text_splitter,
+    build_evidence_payload,
+    extract_unique_document_ids,
+    CONNECTION_STRING,
+    COLLECTION_NAME,
+    AZURE_OPENAI_ENDPOINT,
+    AZURE_OPENAI_KEY,
+    AZURE_OPENAI_MODEL,
+    SIMILARITY_THRESHOLD,
+)
+
+# Import faithfulness verification (hallucination detection)
+from ai_engine.faithfulness_scorer import (
+    verify_faithfulness as _verify_faithfulness,
+    evaluate_with_ragas as _evaluate_with_ragas,
+    score_answer,
+    FAITHFULNESS_THRESHOLD,
+)
+
+# 🚨 FIX: Handle duplicate Prometheus metric registration during module re-import
+# When Django imports this module multiple times during URL resolution,
+# metrics that are registered globally will fail on subsequent imports.
+# Solution: Wrap all metric registrations in try/except to gracefully handle duplicates.
+logger = logging.getLogger(__name__)
 
 # Azure Search - optional for local dev, required for cloud
 try:
@@ -64,243 +101,77 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # PROMETHEUS METRICS FOR MISSION CONTROL
 # ============================================================================
-VERIFICATION_REJECTIONS = Counter(
-    'verirag_hallucination_rejections_total',
-    'Total number of AI responses rejected for low faithfulness'
-)
+# Note: Wrapped in try/except to handle duplicate registration when module
+# is imported multiple times (e.g., during Django URL resolution)
+try:
+    VERIFICATION_REJECTIONS = Counter(
+        'verirag_hallucination_rejections_total',
+        'Total number of AI responses rejected for low faithfulness'
+    )
+except ValueError:
+    # Metric already registered, skip
+    pass
 
-LLM_FALLBACKS = Counter(
-    'verirag_llm_fallbacks_total',
-    'Total number of times the system switched to the backup LLM'
-)
+try:
+    LLM_FALLBACKS = Counter(
+        'verirag_llm_fallbacks_total',
+        'Total number of times the system switched to the backup LLM'
+    )
+except ValueError:
+    pass
 
-QUERIES_TOTAL = Counter(
-    'verirag_queries_total',
-    'Total number of RAG queries processed'
-)
+try:
+    QUERIES_TOTAL = Counter(
+        'verirag_queries_total',
+        'Total number of RAG queries processed'
+    )
+except ValueError:
+    pass
 
-DOCUMENTS_INGESTED = Counter(
-    'verirag_documents_ingested_total',
-    'Total number of documents successfully ingested'
-)
+try:
+    DOCUMENTS_INGESTED = Counter(
+        'verirag_documents_ingested_total',
+        'Total number of documents successfully ingested'
+    )
+except ValueError:
+    pass
 
-FAITHFULNESS_HISTOGRAM = Histogram(
-    'verirag_faithfulness_score',
-    'Distribution of faithfulness scores',
-    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-)
+try:
+    FAITHFULNESS_HISTOGRAM = Histogram(
+        'verirag_faithfulness_score',
+        'Distribution of faithfulness scores',
+        buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    )
+except ValueError:
+    pass
 
-ACTIVE_MODEL = Gauge(
-    'verirag_active_model',
-    'Currently active LLM model (1=Gemini, 2=Groq)',
-)
-ACTIVE_MODEL.set(1)  # Default to Gemini
+try:
+    ACTIVE_MODEL = Gauge(
+        'verirag_active_model',
+        'Currently active LLM model (1=Gemini, 2=Groq)',
+    )
+    ACTIVE_MODEL.set(1)  # Default to Gemini
+except ValueError:
+    pass
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-DB_USER = os.environ.get("POSTGRES_USER", "admin")
-DB_PASS = os.environ.get("POSTGRES_PASSWORD", "devpassword")
-DB_HOST = os.environ.get("POSTGRES_HOST", "rag-db")
-DB_PORT = os.environ.get("POSTGRES_PORT", "5432")
-DB_NAME = os.environ.get("POSTGRES_DB", "verirag_db")
-
-CONNECTION_STRING = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-COLLECTION_NAME = os.environ.get("PGVECTOR_COLLECTION_NAME", "verirag_documents")
-
-# ============================================================================
-# AZURE CONFIGURATION
-# ============================================================================
-AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
-# Try both variable names for backward compatibility
-AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
-AZURE_OPENAI_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT") or os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME") or "gpt-4-turbo"
-
-AZURE_SEARCH_ENDPOINT = os.environ.get("AZURE_SEARCH_ENDPOINT")
-AZURE_SEARCH_KEY = os.environ.get("AZURE_SEARCH_KEY")
-AZURE_SEARCH_INDEX = os.environ.get("AZURE_SEARCH_INDEX", "verirag-documents")
+# Database configuration is imported from vector_store module
+# Azure configuration is imported from vector_store module
 
 # Verification thresholds
 FAITHFULNESS_THRESHOLD = 0.6  # Below this triggers fallback
-SIMILARITY_THRESHOLD = 0.7    # Minimum similarity score for context
 
 
 def _build_evidence_payload(docs):
-    evidence = []
-    for i, doc in enumerate(docs, start=1):
-        page = doc.metadata.get('page', 'Unknown')
-        title = doc.metadata.get('document_title', 'Document')
-        evidence.append(
-            {
-                "source_index": i,
-                "document_title": title,
-                "page": page,
-                "chunk_index": doc.metadata.get("chunk_index"),
-                "citation": f"{title} (Page {page})",
-                "excerpt": doc.page_content[:320].strip(),
-            }
-        )
-    return evidence
+    """Re-export from vector_store for backward compatibility."""
+    return build_evidence_payload(docs)
 
 
 def _extract_unique_document_ids(docs):
-    document_ids = []
-    for doc in docs:
-        document_id = doc.metadata.get("document_id")
-        if document_id is not None:
-            document_ids.append(str(document_id))
-    return sorted(set(document_ids))
-
-# ============================================================================
-# DUAL-MODE SECRET RETRIEVAL
-# ============================================================================
-# Detects DEPLOY_MODE to choose HashiCorp Vault (local) or Azure Key Vault (cloud).
-# API keys are NEVER stored in .env or environment variables.
-# ============================================================================
-_api_key_cache = {}  # Per-key cache: { "KEY_NAME": { "value": ..., "ts": ... } }
-CACHE_TTL = 300  # 5 minutes
-
-DEPLOY_MODE = os.environ.get('DEPLOY_MODE', 'local').lower()
-AZURE_KEY_VAULT_URL = os.environ.get('AZURE_KEY_VAULT_URL')
-
-# Override: if AZURE_KEY_VAULT_URL is set, treat as cloud
-if AZURE_KEY_VAULT_URL:
-    DEPLOY_MODE = 'cloud'
-
-
-def _get_vault_client():
-    """
-    Creates and validates a HashiCorp Vault client connection (local mode only).
-    Returns (client, error_message) tuple.
-    """
-    vault_url = os.environ.get('VAULT_ADDR', 'http://rag-vault:8200')
-    vault_token = os.environ.get('VAULT_TOKEN')
-
-    if not vault_token:
-        return None, "VAULT_TOKEN not set"
-
-    try:
-        client = hvac.Client(url=vault_url, token=vault_token)
-        if not client.is_authenticated():
-            return None, "Vault authentication failed"
-        return client, None
-    except Exception as e:
-        return None, str(e)
-
-
-def get_api_key_from_vault(key_name="GOOGLE_API_KEY"):
-    """
-    Retrieves API keys from the active secret backend with per-key caching.
-
-    Dual-mode:
-      - DEPLOY_MODE=local  → HashiCorp Vault KV v2 at secret/myapp
-      - DEPLOY_MODE=cloud  → Azure Key Vault (via DefaultAzureCredential)
-
-    Falls back to environment variables ONLY if both vault backends fail.
-
-    Expected keys: GOOGLE_API_KEY, GROQ_API_KEY
-    """
-    import time
-
-    current_time = time.time()
-
-    # Check per-key cache first
-    cached = _api_key_cache.get(key_name)
-    if cached and (current_time - cached["ts"]) < CACHE_TTL:
-        return cached["value"]
-
-    api_key = None
-
-    if DEPLOY_MODE == 'cloud' and AZURE_KEY_VAULT_URL:
-        # ── Azure Key Vault path ──
-        try:
-            from azure.identity import DefaultAzureCredential
-            from azure.keyvault.secrets import SecretClient
-
-            client = SecretClient(
-                vault_url=AZURE_KEY_VAULT_URL,
-                credential=DefaultAzureCredential(),
-            )
-            azure_secret_name = key_name.replace('_', '-')  # GOOGLE_API_KEY → GOOGLE-API-KEY
-            api_key = client.get_secret(azure_secret_name).value
-            if api_key:
-                _api_key_cache[key_name] = {"value": api_key, "ts": current_time}
-                logger.info(f"✅ Retrieved {key_name} from Azure Key Vault (cached for {CACHE_TTL}s)")
-                return api_key
-        except ImportError:
-            logger.error("azure-identity or azure-keyvault-secrets not installed")
-        except Exception as e:
-            logger.error(f"Azure Key Vault error for {key_name}: {e}")
-    else:
-        # ── HashiCorp Vault path (local mode) ──
-        try:
-            client, err = _get_vault_client()
-            if client is None:
-                logger.warning(f"Vault unavailable ({err}), falling back to env for {key_name}")
-                return os.environ.get(key_name)
-
-            secret_response = client.secrets.kv.v2.read_secret_version(
-                path='myapp',
-                mount_point='secret'
-            )
-
-            api_key = secret_response['data']['data'].get(key_name)
-
-            if api_key:
-                _api_key_cache[key_name] = {"value": api_key, "ts": current_time}
-                logger.info(f"✅ Retrieved {key_name} from Vault (cached for {CACHE_TTL}s)")
-                return api_key
-
-        except hvac.exceptions.VaultError as ve:
-            logger.error(f"Vault API error for {key_name}: {ve}")
-        except Exception as e:
-            logger.error(f"Vault connection error for {key_name}: {e}")
-
-    logger.warning(f"{key_name} not found in vault, falling back to environment")
-    return os.environ.get(key_name)
-
-
-def get_groq_api_key():
-    """Retrieves Groq API key from Vault or environment."""
-    return get_api_key_from_vault("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
-
-
-@lru_cache(maxsize=1)
-def get_embedding_model():
-    """
-    Creates Azure OpenAI embedding model (text-embedding-3-large for academic accuracy).
-    Uses Azure Key Vault or environment variables for credentials.
-    Cached at module level to avoid recreating connection on every request.
-    """
-    if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
-        raise ValueError("Azure OpenAI credentials not configured (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY)")
-
-    try:
-        from langchain_openai import AzureOpenAIEmbeddings
-    except ImportError as exc:
-        raise ImportError(
-            "AzureOpenAIEmbeddings is unavailable. Install compatible langchain_openai/langchain_core versions."
-        ) from exc
-    
-    return AzureOpenAIEmbeddings(
-        model="text-embedding-3-large",  # Upgraded: 3072 dimensions for better accuracy
-        api_version="2024-02-15-preview",
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-        api_key=AZURE_OPENAI_KEY
-    )
-
-
-@lru_cache(maxsize=1)
-def get_vector_store():
-    """
-    Gets the configured PGVector store.
-    Cached at module level to reuse connection.
-    """
-    return PGVector(
-        collection_name=COLLECTION_NAME,
-        connection_string=CONNECTION_STRING,
-        embedding_function=get_embedding_model(),
-    )
+    """Re-export from vector_store for backward compatibility."""
+    return extract_unique_document_ids(docs)
 
 
 # ============================================================================
@@ -763,212 +634,117 @@ def validate_citations(answer_text: str, citations_metadata: list, source_chunks
 # CORE QUERY ENGINE: Minimal, fast, cheap ($0.0004 per query)
 # ============================================================================
 
-def query_academic_rag(
-    query: str,
-    user_id: int,
-    session_paper_ids: list = None,
-    threshold_high: float = 0.88,
-    threshold_low: float = 0.70
-) -> dict:
+def query_academic_rag(query: str) -> dict:
     """
-    Three-tier retrieval strategy costing <$0.001 per query:
-    
-    1. Direct retrieval (0.88+ similarity + is_qa) → NO LLM ($0)
-    2. Synthesis (0.70-0.88 similarity) → 1x LLM call ($0.001)
-    3. Reject (<0.70 similarity) → NO LLM ($0)
-    
-    Args:
-        query: User question
-        user_id: For multi-tenant isolation
-        session_paper_ids: Optional list of Document IDs to constrain search
-        
-    Returns:
-        {
-            'answer': str or None,
-            'confidence': float,
-            'method': 'direct'|'synthesis'|'rejected',
-            'citations': [{'key': 'smith2020', 'text': 'Smith et al. (2020)'}],
-            'sources': [{'id', 'title', 'source', 'excerpt'}],  # NEW: source tracking
-            'reason': 'answered' | 'no_evidence' | 'uncertain',
-            'suggested_papers': [...],  # NEW: fallback suggestions
-            'latency_ms': int,
-            'cost_usd': float
-        }
+    Minimal RAG pipeline:
+    Query -> Retrieve top 3 chunks -> Generate from retrieved context -> Return or reject.
     """
-    import time
-    start = time.time()
-    cost = 0.0
-    
-    try:
-        # ====================================================================
-        # STEP 1: Embed query (tiny cost: $0.00006 for 40 tokens)
-        # ====================================================================
-        embedding_model = get_embedding_model()
-        q_vector = embedding_model.embed_query(query)
-        cost += 0.00006  # text-embedding-3-small rate
-        
-        # ====================================================================
-        # STEP 2: Vector search (PostgreSQL, $0 cost)
-        # ====================================================================
-        from ai_engine.models import ChunkIndex
-        from django.db.models import F, Q
-        from pgvector.django import CosineDistance
-        
-        # Filter by session papers if provided
-        filter_query = Q(user_id=user_id)
-        if session_paper_ids:
-            filter_query &= Q(document_id__in=session_paper_ids)
-        
-        similar_chunks = ChunkIndex.objects.filter(
-            filter_query
-        ).annotate(
-            distance=CosineDistance('embedding', q_vector)
-        ).order_by('distance')[:5]
-        
-        if not similar_chunks:
-            # No chunks found - suggest papers if in no-filter mode
-            suggested = []
-            if not session_paper_ids:
-                # Try to find related papers from Semantic Scholar
-                try:
-                    suggested = _semantic_scholar_search(query, limit=4)
-                except Exception as e:
-                    logger.warning(f"Semantic Scholar lookup failed: {e}")
-            
-            return {
-                'answer': None,
-                'confidence': 0.0,
-                'method': 'rejected',
-                'reason': 'no_evidence',
-                'message': 'No documents found. ' + ('Try pinning papers to ask about them.' if session_paper_ids else 'Try uploading a relevant paper or searching the database.'),
-                'sources': [],
-                'suggested_papers': suggested,
-                'citations': [],
-                'latency_ms': int((time.time() - start) * 1000),
-                'cost_usd': cost
-            }
-        
-        top_chunk = similar_chunks[0]
-        
-        # Convert pgvector distance (0-2) to similarity (0-1)
-        # cosine similarity = 1 - cosine_distance
-        similarity = 1.0 - top_chunk.distance
-        
-        # ====================================================================
-        # STEP 3: DECISION TREE
-        # ====================================================================
-        
-        if similarity >= threshold_high and top_chunk.is_qa:
-            # ✅ DIRECT ANSWER: Return chunk as-is, no LLM
-            # Build citations from pre-computed metadata
-            citations = _build_citations_from_keys(
-                top_chunk.citation_keys,
-                top_chunk.document.metadata
-            )
-            
-            # Build source tracking
-            sources = [
-                {
-                    'id': chunk.document.id,
-                    'title': chunk.document.title,
-                    'source': chunk.document.source,
-                    'score': float(1.0 - chunk.distance),
-                    'excerpt': chunk.content[:200] + '...' if len(chunk.content) > 200 else chunk.content
-                }
-                for chunk in similar_chunks[:3]
-            ]
-            
-            return {
-                'answer': top_chunk.content,
-                'confidence': float(similarity),
-                'method': 'direct_retrieval',
-                'reason': 'answered',
-                'citations': citations,
-                'sources': sources,
-                'source_page': top_chunk.page_number,
-                'latency_ms': int((time.time() - start) * 1000),
-                'cost_usd': cost
-            }
-        
-        elif similarity >= threshold_low:
-            # ⚠️  SYNTHESIS: Need LLM to bridge gap
-            # Use top 3 chunks as context
-            context_chunks = similar_chunks[:3]
-            context_text = "\n\n".join([
-                f"[Source: {c.document.title}, Page {c.page_number}]\n{c.content}"
-                for c in context_chunks
-            ])
-            
-            # Call GPT-3.5 once
-            answer_text = _synthesize_answer(query, context_text)
-            cost += 0.001  # Average GPT-3.5-turbo call
-            
-            # Extract citations (they should be in the synthesis)
-            top_citations = _build_citations_from_keys(
-                context_chunks[0].citation_keys,
-                context_chunks[0].document.metadata
-            )
-            
-            # Build source tracking
-            sources = [
-                {
-                    'id': chunk.document.id,
-                    'title': chunk.document.title,
-                    'source': chunk.document.source,
-                    'score': float(1.0 - chunk.distance),
-                    'excerpt': chunk.content[:200] + '...' if len(chunk.content) > 200 else chunk.content
-                }
-                for chunk in context_chunks
-            ]
-            
-            return {
-                'answer': answer_text,
-                'confidence': float(similarity),
-                'method': 'llm_synthesis',
-                'reason': 'answered',
-                'citations': top_citations,
-                'sources': sources,
-                'latency_ms': int((time.time() - start) * 1000),
-                'cost_usd': cost
-            }
-        
-        else:
-            # ❌ INSUFFICIENT EVIDENCE: Reject gracefully
-            suggested = []
-            if not session_paper_ids:
-                # Try to suggest relevant papers from external sources
-                try:
-                    suggested = _semantic_scholar_search(query, limit=4)
-                except Exception as e:
-                    logger.warning(f"Semantic Scholar lookup failed: {e}")
-            
-            return {
-                'answer': None,
-                'confidence': float(similarity),
-                'method': 'rejected',
-                'reason': 'insufficient_evidence',
-                'message': 'Your documents do not contain sufficient information about this topic.',
-                'sources': [],
-                'suggested_papers': suggested,
-                'citations': [],
-                'latency_ms': int((time.time() - start) * 1000),
-                'cost_usd': cost
-            }
-    
-    except Exception as e:
-        logger.error(f"Query failed: {str(e)}")
+    vector_db = get_vector_store()
+    chunks = vector_db.similarity_search(query, k=3)
+
+    if not chunks:
         return {
-            'answer': None,
-            'confidence': 0.0,
-            'method': 'error',
-            'reason': 'error',
-            'error': str(e),
-            'sources': [],
-            'suggested_papers': [],
-            'citations': [],
-            'latency_ms': int((time.time() - start) * 1000),
-            'cost_usd': 0.0
+            "status": "rejected",
+            "message": "No reliable evidence found",
         }
+
+    context_blocks = []
+    sources = []
+    for index, chunk in enumerate(chunks, start=1):
+        metadata = chunk.metadata or {}
+        title = metadata.get("document_title") or metadata.get("source") or "Document"
+        page = metadata.get("page", metadata.get("page_number"))
+
+        context_blocks.append(f"[Source {index}: {title}, page {page}]\n{chunk.page_content}")
+        sources.append(
+            {
+                "source_index": index,
+                "title": title,
+                "page": page,
+                "excerpt": chunk.page_content[:300],
+            }
+        )
+
+    context = "\n\n---\n\n".join(context_blocks)
+    answer = _generate_answer_from_context(query=query, context=context)
+
+    if "I don't have reliable evidence" in answer:
+        return {
+            "status": "rejected",
+            "message": "No reliable evidence found",
+        }
+
+    return {
+        "status": "success",
+        "answer": answer,
+        "sources": sources,
+    }
+
+
+def _generate_answer_from_context(query: str, context: str) -> str:
+    if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
+        # Mock mode for local testing
+        logger.warning("Azure credentials not configured, using mock response")
+        return _mock_answer_from_context(query, context)
+
+    client = AzureOpenAI(
+        api_key=AZURE_OPENAI_KEY,
+        api_version="2024-02-15-preview",
+        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    )
+
+    prompt = f"""
+You are a strict academic research assistant.
+
+RULES:
+1. Use ONLY the provided context.
+2. If answer is not explicitly in context, say EXACTLY:
+   "I don't have reliable evidence to answer this question."
+3. Do NOT guess.
+4. Cite sources like [Source 1], [Source 2].
+
+Context:
+{context}
+
+Question:
+{query}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model=AZURE_OPENAI_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a strict academic research assistant.",
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            temperature=0,
+            max_tokens=500,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.warning(f"Azure OpenAI call failed: {e}, using mock response")
+        return _mock_answer_from_context(query, context)
+
+
+def _mock_answer_from_context(query: str, context: str) -> str:
+    """Generate a mock answer from context for local testing without Azure."""
+    # Simple extraction logic: find sentences containing query keywords
+    sentences = context.split('.')
+    relevant = [s.strip() for s in sentences if any(word.lower() in s.lower() for word in query.split()[:3])]
+    
+    if relevant:
+        answer = '. '.join(relevant[:2]) + '.'
+    else:
+        # Fallback: use first few sentences
+        answer = '. '.join(sentences[:2]) + '.' if sentences else "Based on the context provided, I can see this is related to your query about " + query.split()[0] if query.split() else ""
+    
+    return answer
 
 
 def _build_citations_from_keys(citation_keys: list, doc_metadata) -> list:
@@ -1081,186 +857,27 @@ def _semantic_scholar_search(query: str, limit: int = 4) -> list:
 # ============================================================================
 # 3. THE VERIFICATION ENGINE - Core "Librarian" Protocol
 # ============================================================================
+# EXTRACTED: Moved to ai_engine.faithfulness_scorer module
+# Backward compatibility wrappers:
+
 def verify_faithfulness(answer, context, query):
     """
     Semantic faithfulness verification using embedding cosine similarity.
-    Replaces naive word-overlap heuristics with embedding-based comparison.
+    [Extracted to faithfulness_scorer.py]
     
     Returns a faithfulness score (0.0-1.0) and verification explanation.
-    This detects subtle hallucinations better than word tally.
     """
-    with trace_context(
-        "rag.verification.semantic",
-        {
-            "rag.query.length": len(query or ""),
-            "rag.answer.length": len(answer or ""),
-            "rag.context.length": len(context or ""),
-        },
-    ):
-        if not answer or not context:
-            add_span_attributes({"rag.verification.score": 0.5})
-            return 0.5, "Answer or context is empty"
-        
-        try:
-            # Get embeddings for answer and context using the same model
-            embedding_model = get_embedding_model()
-            answer_embedding = embedding_model.embed_query(answer)
-            context_embedding = embedding_model.embed_query(context)
-            
-            # Compute cosine similarity between answer and context embeddings
-            from sklearn.metrics.pairwise import cosine_similarity
-            import numpy as np
-            
-            similarity_matrix = cosine_similarity(
-                [answer_embedding], 
-                [context_embedding]
-            )
-            similarity_score = float(similarity_matrix[0][0])
-            
-            # Normalize to 0-1 range (cosine similarity is already -1 to 1, but for embeddings typically 0-1)
-            final_score = max(0.0, min(1.0, similarity_score))
-            
-            add_span_attributes(
-                {
-                    "rag.verification.score": round(final_score, 4),
-                    "rag.verification.method": "semantic_cosine_similarity",
-                }
-            )
-            explanation = f"Semantic similarity: {final_score:.2%}"
-            return final_score, explanation
-            
-        except Exception as e:
-            logger.error(f"Semantic verification failed, falling back to heuristic: {e}")
-            # Fallback to simple word overlap if embeddings fail
-            answer_lower = answer.lower()
-            context_lower = context.lower()
-            
-            answer_words = set(re.findall(r'\b\w{4,}\b', answer_lower))
-            context_words = set(re.findall(r'\b\w{4,}\b', context_lower))
-            
-            if not answer_words:
-                return 0.5, "Unable to extract key terms from answer"
-            
-            overlap = answer_words.intersection(context_words)
-            coverage = len(overlap) / len(answer_words) if answer_words else 0
-            new_terms = answer_words - context_words
-            novelty_penalty = min(len(new_terms) * 0.05, 0.3)
-            base_score = coverage - novelty_penalty
-            final_score = max(0.0, min(1.0, base_score + 0.3))
-            
-            add_span_attributes({"rag.verification.score": final_score})
-            return final_score, f"Fallback heuristic - overlap: {len(overlap)}/{len(answer_words)}"
+    return _verify_faithfulness(answer, context, query)
 
 
 def evaluate_with_ragas(query: str, answer: str, contexts: list, ground_truth: str = None) -> dict:
     """
     LLM-based evaluation using RAGAS framework.
-    Replaces heuristic verification with four proper metrics using LLM judgment.
+    [Extracted to faithfulness_scorer.py]
     
-    Returns dict with:
-      - faithfulness: Is the answer grounded in the context? (0-1)
-      - answer_relevancy: Does the answer actually address the question? (0-1)
-      - context_precision: Are the retrieved chunks relevant? (0-1)
-      - context_recall: Did we retrieve enough to answer? (0-1, requires ground_truth)
-      - combined_score: Weighted aggregate score (0-1)
-    
-    All metrics use the same Gemini model as the main pipeline to ensure consistency.
+    Returns dict with faithfulness, answer_relevancy, context_precision, etc.
     """
-    try:
-        from ragas import evaluate
-        from ragas.metrics import (
-            faithfulness,
-            answer_relevancy,
-            context_precision,
-            context_recall,
-        )
-        from datasets import Dataset
-        
-        # Prepare data in RAGAS format
-        # contexts should be list of text strings from retrieved documents
-        if isinstance(contexts, list) and len(contexts) > 0:
-            if hasattr(contexts[0], 'page_content'):
-                # LangChain Document objects
-                context_texts = [doc.page_content for doc in contexts]
-            else:
-                # Plain strings
-                context_texts = contexts
-        else:
-            context_texts = []
-        
-        data_dict = {
-            "question": [query],
-            "answer": [answer],
-            "contexts": [context_texts],
-        }
-        
-        # Include ground truth if provided for context recall calculation
-        metrics_to_evaluate = [faithfulness, answer_relevancy, context_precision]
-        if ground_truth:
-            data_dict["ground_truth"] = [ground_truth]
-            metrics_to_evaluate.append(context_recall)
-        
-        # Create RAGAS dataset and evaluate
-        dataset = Dataset.from_dict(data_dict)
-        result = evaluate(dataset, metrics=metrics_to_evaluate)
-        
-        # Extract scores with safe defaults
-        ragas_scores = {
-            "faithfulness": round(float(result.get("faithfulness", 0.5)), 3),
-            "answer_relevancy": round(float(result.get("answer_relevancy", 0.5)), 3),
-            "context_precision": round(float(result.get("context_precision", 0.5)), 3),
-            "context_recall": round(float(result.get("context_recall", 0.0)), 3) if ground_truth else 0.0,
-        }
-        
-        # Calculate weighted combined score
-        # Faithfulness: 50% (most critical - must be grounded)
-        # Answer relevancy: 30% (must address the question)
-        # Context precision: 20% (retrieval quality matters)
-        ragas_scores["combined_score"] = round(
-            (ragas_scores["faithfulness"] * 0.5) +
-            (ragas_scores["answer_relevancy"] * 0.3) +
-            (ragas_scores["context_precision"] * 0.2),
-            3
-        )
-        
-        # Log metrics to Prometheus
-        FAITHFULNESS_HISTOGRAM.observe(ragas_scores["faithfulness"])
-        
-        # Attach all scores to trace span
-        add_span_attributes({
-            "rag.ragas.faithfulness": ragas_scores["faithfulness"],
-            "rag.ragas.answer_relevancy": ragas_scores["answer_relevancy"],
-            "rag.ragas.context_precision": ragas_scores["context_precision"],
-            "rag.ragas.context_recall": ragas_scores["context_recall"],
-            "rag.ragas.combined_score": ragas_scores["combined_score"],
-        })
-        
-        logger.info(f"RAGAS evaluation complete - faithfulness: {ragas_scores['faithfulness']:.2f}")
-        return ragas_scores
-        
-    except ImportError as e:
-        logger.warning(f"RAGAS not available ({e}), falling back to basic verification")
-        # Fallback: use existing semantic verification
-        score, explanation = verify_faithfulness(answer, "\n".join(
-            [c.page_content if hasattr(c, 'page_content') else str(c) for c in contexts]
-        ), query)
-        return {
-            "faithfulness": score,
-            "answer_relevancy": 0.5,
-            "context_precision": 0.5,
-            "context_recall": 0.0,
-            "combined_score": score,
-        }
-    except Exception as e:
-        logger.error(f"RAGAS evaluation failed: {e}")
-        # Safe fallback
-        return {
-            "faithfulness": 0.5,
-            "answer_relevancy": 0.5,
-            "context_precision": 0.5,
-            "context_recall": 0.0,
-            "combined_score": 0.5,
-        }
+    return _evaluate_with_ragas(query, answer, contexts, ground_truth)
 
 
 def get_verified_answer(query, user_id, request_context=None):

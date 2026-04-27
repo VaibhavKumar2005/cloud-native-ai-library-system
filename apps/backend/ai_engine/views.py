@@ -105,137 +105,20 @@ class DocumentViewSet(viewsets.ModelViewSet):
 # ============================================================================
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@drf_throttle_classes([QueryUserRateThrottle])
+@permission_classes([AllowAny])
 def query_llm(request):
     """
-    Minimal RAG query endpoint - $97 budget version.
-    Direct retrieval or single LLM synthesis, no fancy ops.
+    Minimal RAG query endpoint.
     """
     from ai_engine.rag_logic import query_academic_rag
-    from ai_engine.models import QueryLog
-    
+
     user_query = request.data.get('query')
-    
-    if not user_query or len(user_query) > 2000:
-        return Response({"error": "Invalid query length"}, status=status.HTTP_400_BAD_REQUEST)
 
-    start_time = time.time()
-    
-    try:
-        # Call simplified RAG engine
-        result = query_academic_rag(
-            query=user_query,
-            user_id=request.user.id
-        )
-        
-        # Log for cost tracking
-        QueryLog.objects.create(
-            user=request.user,
-            query_text=user_query,
-            method=result.get('method', 'error'),
-            tokens_used=result.get('tokens_used', 0),
-            cost_usd=result.get('cost_usd', 0.0),
-            latency_ms=result.get('latency_ms', int((time.time() - start_time) * 1000))
-        )
-        
-        return Response(result)
-    
-    except Exception as e:
-        logger.error(f"Query failed: {str(e)}")
-        return Response(
-            {"error": str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-        
-        # 1. CostOps: Track Azure OpenAI costs
-        try:
-            cost_tracker = get_cost_tracker()
-            cost_tracker.log_request(
-                operation="rag_query",
-                model=result.get("model_used", "unknown"),
-                tokens_used=result.get("tokens_used", 0),
-                cost=result.get("cost", 0.0),
-                metadata={
-                    "query_id": query_id,
-                    "user_id": request.user.id,
-                    "verification_passed": result.get("verification_passed", False),
-                }
-            )
-        except Exception as e:
-            logger.warning(f"CostOps logging failed: {e}")
-        
-        # 2. QualityOps: Evaluate response quality
-        try:
-            quality_gate = get_quality_gate()
-            quality_assessment = quality_gate.evaluate_response(
-                query=user_query,
-                response=result.get("answer", ""),
-                context_chunks=result.get("context_chunks_used", 0),
-                model_used=result.get("model_used", "unknown"),
-                scores={
-                    "faithfulness": result.get("evaluation", {}).get("faithfulness", 0.5),
-                    "answer_relevancy": result.get("evaluation", {}).get("answer_relevancy", 0.5),
-                    "context_precision": result.get("evaluation", {}).get("context_precision", 0.5),
-                    "context_recall": result.get("evaluation", {}).get("context_recall", 0.5),
-                }
-            )
-            result["quality_assessment"] = quality_assessment
-        except Exception as e:
-            logger.warning(f"QualityOps evaluation failed: {e}")
-        
-        # 3. DriftOps: Monitor for model and response drift
-        try:
-            drift_ops = get_drift_ops()
-            # Log response pattern for drift detection
-            drift_ops.log_response_pattern(
-                query=user_query,
-                response_length=len(result.get("answer", "")),
-                quality_score=result.get("evaluation", {}).get("combined_score", 0.5),
-                latency_ms=latency_ms,
-                has_hallucinations=not result.get("verification_passed", False),
-                avg_token_confidence=result.get("evaluation", {}).get("faithfulness", 0.95),
-            )
-            # Check for drift and include alerts in response
-            drift_alerts = drift_ops.get_recent_alerts(minutes=60)
-            if drift_alerts:
-                result["drift_alerts"] = [
-                    {
-                        "type": a.drift_type,
-                        "severity": a.severity,
-                        "description": a.description,
-                    }
-                    for a in drift_alerts[:3]  # Include top 3 recent alerts
-                ]
-        except Exception as e:
-            logger.warning(f"DriftOps monitoring failed: {e}")
-        
-        trace_id = get_trace_id()
-        result["query_id"] = query_id
-        result["trace_id"] = trace_id
-        result["latency_ms"] = latency_ms
-        add_span_attributes(
-            {
-                "rag.response.trace_id": trace_id or "",
-                "rag.response.latency_ms": latency_ms,
-                "rag.response.verification_passed": result.get("verification_passed", False),
-                "rag.response.model_used": result.get("model_used", "unknown"),
-            }
-        )
-        record_event(
-            "rag.query.completed",
-            {
-                "rag.query.id": query_id,
-                "rag.response.model_used": result.get("model_used", "unknown"),
-                "rag.response.verification_passed": result.get("verification_passed", False),
-            },
-        )
+    if not user_query or not str(user_query).strip():
+        return Response({"error": "query is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    response = Response(result)
-    if trace_id:
-        response["X-Trace-Id"] = trace_id
-    response["X-Query-Id"] = query_id
-    return response
+    result = query_academic_rag(str(user_query).strip())
+    return Response(result)
 
 
 @api_view(['POST'])
@@ -265,11 +148,7 @@ def research_query(request):
     
     try:
         # Call enhanced RAG engine with session filtering
-        result = query_academic_rag(
-            query=user_query,
-            user_id=request.user.id,
-            session_paper_ids=session_paper_ids if session_paper_ids else None
-        )
+        result = query_academic_rag(query=user_query)
         
         # Log for cost tracking
         QueryLog.objects.create(

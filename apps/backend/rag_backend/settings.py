@@ -144,6 +144,12 @@ def env_bool(name: str, default: bool = False) -> bool:
 DEBUG = env_bool('DEBUG', default=False)
 IS_PRODUCTION = DEPLOY_MODE == 'cloud'
 
+# 🚨 DEMO MODE: Disable authentication for demo/testing purposes.
+# Set DEMO_MODE=true to allow unauthenticated access to all API endpoints.
+# ⚠️ SECURITY WARNING: Only use in non-production environments!
+# TODO: Remove after May 1st, 2026
+DEMO_MODE = env_bool('DEMO_MODE', default=False)
+
 SECRET_KEY = os.environ.get(
     'DJANGO_SECRET_KEY',
     secrets.token_urlsafe(50) if DEBUG else None
@@ -324,12 +330,16 @@ GITHUB_OAUTH_REDIRECT_URI = os.environ.get(
     'http://localhost:8000/api/auth/github/callback/',
 ).strip()
 
+# 🚨 DEMO MODE: Conditional permissions based on DEMO_MODE flag
+# When DEMO_MODE=true, all endpoints allow unauthenticated access.
+# This is a temporary workaround for OAuth breakage (Google/GitHub/Magic Links)
+# TODO: Re-enable authentication after May 1st, 2026
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.AllowAny' if DEMO_MODE else 'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_THROTTLE_CLASSES': (
         'rest_framework.throttling.AnonRateThrottle',

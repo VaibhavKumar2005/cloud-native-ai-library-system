@@ -34,12 +34,15 @@ from .auth_views import (
     EmailLoginSendView,
     EmailLoginVerifyView,
 )
+from ai_engine.views import query_llm
 
 # 1. Add this import for the Swagger UI
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('query', query_llm, name='query'),
+    path('query/', query_llm, name='query_slash'),
     path('api/', include('ai_engine.urls')), 
     path('', include('django_prometheus.urls')), 
 

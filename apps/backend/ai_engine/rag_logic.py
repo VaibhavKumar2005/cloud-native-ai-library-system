@@ -10,21 +10,13 @@ import logging
 import re
 import time
 from functools import lru_cache
+from opentelemetry import trace
 from openai import AzureOpenAI, OpenAI
 from prometheus_client import Counter, Histogram, Gauge
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from ai_engine.models import Document
-
-# Import vault configuration (secrets management)
-from ai_engine.vault_config import (
-    get_api_key_from_vault,
-    get_groq_api_key,
-    get_google_api_key,
-    DEPLOY_MODE,
-    AZURE_KEY_VAULT_URL,
-)
 
 # Import vector store operations (embeddings & pgvector)
 from ai_engine.vector_store import (
@@ -97,6 +89,9 @@ except ImportError:
 
 # Set up logging for debugging
 logger = logging.getLogger(__name__)
+
+# Set up OpenTelemetry tracing
+tracer = trace.get_tracer(__name__)
 
 # ============================================================================
 # PROMETHEUS METRICS FOR MISSION CONTROL
@@ -639,61 +634,77 @@ def query_academic_rag(query: str) -> dict:
     Minimal RAG pipeline:
     Query -> Retrieve top 3 chunks -> Generate from retrieved context -> Return or reject.
     """
-    vector_db = get_vector_store()
-    chunks = vector_db.similarity_search(query, k=3)
+    with tracer.start_as_current_span("query_academic_rag") as span:
+        span.set_attribute("query", query)
+        
+        vector_db = get_vector_store()
+        
+        with tracer.start_as_current_span("similarity_search"):
+            chunks = vector_db.similarity_search(query, k=3)
 
-    if not chunks:
-        return {
-            "status": "rejected",
-            "message": "No reliable evidence found",
-        }
-
-    context_blocks = []
-    sources = []
-    for index, chunk in enumerate(chunks, start=1):
-        metadata = chunk.metadata or {}
-        title = metadata.get("document_title") or metadata.get("source") or "Document"
-        page = metadata.get("page", metadata.get("page_number"))
-
-        context_blocks.append(f"[Source {index}: {title}, page {page}]\n{chunk.page_content}")
-        sources.append(
-            {
-                "source_index": index,
-                "title": title,
-                "page": page,
-                "excerpt": chunk.page_content[:300],
+        if not chunks:
+            span.set_attribute("result", "no_results")
+            return {
+                "status": "rejected",
+                "message": "No reliable evidence found",
             }
-        )
 
-    context = "\n\n---\n\n".join(context_blocks)
-    answer = _generate_answer_from_context(query=query, context=context)
+        context_blocks = []
+        sources = []
+        for index, chunk in enumerate(chunks, start=1):
+            metadata = chunk.metadata or {}
+            title = metadata.get("document_title") or metadata.get("source") or "Document"
+            page = metadata.get("page", metadata.get("page_number"))
 
-    if "I don't have reliable evidence" in answer:
+            context_blocks.append(f"[Source {index}: {title}, page {page}]\n{chunk.page_content}")
+            sources.append(
+                {
+                    "source_index": index,
+                    "title": title,
+                    "page": page,
+                    "excerpt": chunk.page_content[:300],
+                }
+            )
+
+        context = "\n\n---\n\n".join(context_blocks)
+        
+        with tracer.start_as_current_span("generate_answer"):
+            answer = _generate_answer_from_context(query=query, context=context)
+
+        if "I don't have reliable evidence" in answer:
+            span.set_attribute("result", "rejected")
+            return {
+                "status": "rejected",
+                "message": "No reliable evidence found",
+            }
+
+        span.set_attribute("result", "success")
+        span.set_attribute("source_count", len(sources))
         return {
-            "status": "rejected",
-            "message": "No reliable evidence found",
+            "status": "success",
+            "answer": answer,
+            "sources": sources,
         }
-
-    return {
-        "status": "success",
-        "answer": answer,
-        "sources": sources,
-    }
 
 
 def _generate_answer_from_context(query: str, context: str) -> str:
-    if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
-        # Mock mode for local testing
-        logger.warning("Azure credentials not configured, using mock response")
-        return _mock_answer_from_context(query, context)
+    with tracer.start_as_current_span("generate_answer_from_context") as span:
+        span.set_attribute("query_length", len(query))
+        span.set_attribute("context_length", len(context))
+        
+        if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_KEY:
+            # Mock mode for local testing
+            logger.warning("Azure credentials not configured, using mock response")
+            span.set_attribute("mode", "mock")
+            return _mock_answer_from_context(query, context)
 
-    client = AzureOpenAI(
-        api_key=AZURE_OPENAI_KEY,
-        api_version="2024-02-15-preview",
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    )
+        client = AzureOpenAI(
+            api_key=AZURE_OPENAI_KEY,
+            api_version="2024-02-15-preview",
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+        )
 
-    prompt = f"""
+        prompt = f"""
 You are a strict academic research assistant.
 
 RULES:
@@ -710,26 +721,30 @@ Question:
 {query}
 """
 
-    try:
-        response = client.chat.completions.create(
-            model=AZURE_OPENAI_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a strict academic research assistant.",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=0,
-            max_tokens=500,
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.warning(f"Azure OpenAI call failed: {e}, using mock response")
-        return _mock_answer_from_context(query, context)
+        try:
+            with tracer.start_as_current_span("azure_openai_call"):
+                response = client.chat.completions.create(
+                    model=AZURE_OPENAI_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a strict academic research assistant.",
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ],
+                    temperature=0,
+                    max_tokens=500,
+                )
+            span.set_attribute("mode", "azure")
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.warning(f"Azure OpenAI call failed: {e}, using mock response")
+            span.set_attribute("mode", "mock_fallback")
+            span.set_attribute("error", str(e))
+            return _mock_answer_from_context(query, context)
 
 
 def _mock_answer_from_context(query: str, context: str) -> str:

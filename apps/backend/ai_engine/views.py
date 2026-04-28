@@ -11,6 +11,7 @@ import hvac
 from django.db import connections
 from django.db.utils import OperationalError
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes, action, throttle_classes as drf_throttle_classes
@@ -50,15 +51,35 @@ class DocumentViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser]
     throttle_classes = [UploadUserRateThrottle]
 
+    def get_permissions(self):
+        if settings.DEMO_MODE:
+            return [AllowAny()]
+        return super().get_permissions()
+
+    def _get_demo_user(self):
+        User = get_user_model()
+        user, _ = User.objects.get_or_create(
+            username='demo',
+            defaults={
+                'email': 'demo@verirag.local',
+                'is_active': True,
+            },
+        )
+        return user
+
     def get_queryset(self):
         """Users can only retrieve their own documents."""
+        if settings.DEMO_MODE and not self.request.user.is_authenticated:
+            return Document.objects.filter(user=self._get_demo_user())
         return Document.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
         """Auto-assign document to user and trigger async ingestion."""
+        owner = self.request.user if self.request.user.is_authenticated else self._get_demo_user()
+
         # 1. Save the document to the database
         document = serializer.save(
-            user=self.request.user,
+            user=owner,
             processed=False,
             status=Document.Status.QUEUED,
             progress_percent=0,
@@ -69,11 +90,17 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
         try:
             # Using .delay() keeps upload latency low while the worker handles indexing.
-            ingest_document_task.delay(document.id)
-            logger.info(f"✅ Document {document.id} saved and queued for background processing.")
+            if getattr(settings, 'INGEST_SYNC_ON_UPLOAD', False):
+                ingest_document_task.apply(args=[document.id])
+                logger.info("Document %s saved and processed synchronously.", document.id)
+            else:
+                ingest_document_task.delay(document.id)
+                logger.info("Document %s saved and queued for background processing.", document.id)
         except Exception as exc:
-            # Queue outages should not block the file upload itself.
             logger.exception("Failed to queue ingestion for document %s: %s", document.id, exc)
+            if getattr(settings, 'INGEST_SYNC_FALLBACK', True):
+                ingest_document_task.apply(args=[document.id])
+                logger.info("Document %s processed synchronously after queue failure.", document.id)
 
     @action(detail=True, methods=['post'])
     @drf_throttle_classes([DocumentActionUserRateThrottle])

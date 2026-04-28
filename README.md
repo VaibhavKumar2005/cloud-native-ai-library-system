@@ -1,268 +1,366 @@
-# VeriRAG - The Azure-Native AI Librarian
+# VeriRAG – Verified Research Assistant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status: Active Development](https://img.shields.io/badge/status-active%20development-brightgreen)](https://github.com/VaibhavKumar2005/cloud-native-ai-library-system)
+[![Status: Research Grade](https://img.shields.io/badge/status-research%20grade-blue)]()
 [![Python: 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
-[![Node.js: 18+](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org/)
-[![Security: Policy](https://img.shields.io/badge/Security-Policy.md-blue)](.github/SECURITY.md)
-[![Commits: Monthly](https://img.shields.io/badge/commits-28%2Fmonth-blueviolet)](https://github.com/VaibhavKumar2005/cloud-native-ai-library-system/commits)
-
-> **A cloud-native RAG platform delivering trustworthy, citation-backed answers with dual-agent verification, academic research discovery, and automatic LLM failover.**
-
-VeriRAG is an intelligent document library system that ingests PDFs and answers user questions with **verified, citation-backed responses**. The system scores each AI-generated answer for faithfulness and automatically regenerates responses using a backup LLM if verification fails. Includes dedicated **academic paper discovery** for PhD research with integration to Semantic Scholar, arXiv, and CrossRef.
 
 ---
 
-## Key Features
+## 🎓 What This Project Does
 
-- ✅ **Verified AI Responses** — Every answer is scored for faithfulness against source documents
-- ✅ **Automatic Failover** — Regenerates responses using backup LLM if verification fails
-- ✅ **Citation Grounding** — Provides source references for every answer
-- ✅ **Academic Research Discovery** — Native integration with Semantic Scholar, arXiv, CrossRef, and Google Scholar for PhD research
-- ✅ **OAuth Integration** — Google & GitHub authentication with social sign-in support
-- ✅ **Cost Optimized** — Built for a $97/month budget on Azure
-- ✅ **Production Ready** — Cloud-native architecture for Azure Container Apps
-- ✅ **Observable** — Real-time metrics with Prometheus, Grafana, and Azure Monitor
-- ✅ **Enhanced UX** — Command palette, intelligent search, and streamlined interface
+VeriRAG is an **evidence-based question-answering system for academic research**. Given a collection of research papers (PDFs), it answers questions with citations to source material and automatically rejects queries when evidence is insufficient.
+
+Unlike general-purpose LLMs, VeriRAG operates under one core constraint: **it cannot and will not invent information**. Every claim in an answer must be traceable to a retrieved document.
+
+**Key distinction**: This is not a RAG chatbot for customer service. This is a research verification system designed for PhD-level work where citation accuracy is non-negotiable.
 
 ---
 
-## Tech Stack
+## 🧠 The Research Problem
 
-| Component | Technology |
-|-----------|------------|
-| **Frontend** | React 19 + Vite + Tailwind CSS |
-| **Backend** | Django 5.0 + Django REST Framework |
-| **Async Backend** | FastAPI (optional alternative for high-performance RAG) |
-| **Primary LLM** | Google Gemini 1.5 Flash |
-| **Backup LLM** | Groq / Llama-3 8B |
-| **Academic Integration** | Semantic Scholar, arXiv, CrossRef, Google Scholar APIs |
-| **Vector DB** | PostgreSQL 16 + pgvector |
-| **Embeddings** | Google text-embedding-004 |
-| **Task Queue** | Celery + Redis |
-| **Cloud** | Azure Container Apps + ACR |
-| **IaC** | Terraform |
-| **Authentication** | OAuth 2.0 (Google & GitHub) |
+### Why This Matters
+
+Large language models **hallucinate**. They generate plausible-sounding text that is completely false. When a researcher asks "What does [Paper X] say about chunking?", a standard LLM might:
+- Invent authors who don't exist
+- Cite methods from other papers
+- Create results that were never reported
+
+For academic research, these errors are catastrophic. A paper built on hallucinated evidence becomes retractable.
+
+### The Solution: Grounded Answer Generation
+
+VeriRAG addresses this through:
+
+1. **Retrieval-Augmented Generation (RAG)**: Answer only from papers you've uploaded
+2. **Verification**: Score each answer for faithfulness to source material
+3. **Rejection**: Refuse to answer if confidence is insufficient
+4. **Citation Grounding**: Every claim includes source references
+
+**Result**: When VeriRAG says something, you can verify it against your papers.
 
 ---
 
-## Quick Start
+## 📚 How It Works (Research Workflow)
+
+```
+Researcher uploads PDF papers
+           ↓
+Question: "How does RAG reduce hallucination?"
+           ↓
+[1] RETRIEVE → Vector search finds relevant paper sections
+           ↓
+[2] RANK → Order by relevance (semantic similarity)
+           ↓
+[3] SYNTHESIZE → Generate coherent answer from top sections
+           ↓
+[4] VERIFY → Check if answer is grounded in retrieved text
+           ↓
+[5] RETURN/REJECT → 
+    If confidence ≥ 0.6: Return with citations
+    If confidence < 0.6: "Insufficient evidence in your papers"
+```
+
+**Core principle**: Every response is either grounded (return with citations) or rejected. There is no "guess" option.
+
+---
+
+## 🔬 Academic Paper Integration
+
+### Supported Input Formats
+- **PDF research papers** (uploaded via UI)
+- **arXiv papers** (via API integration, if enabled)
+- **Semantic Scholar** (paper metadata and abstracts, if enabled)
+- **Plain text documents** (technical reports, theses, etc.)
+
+### Processing Pipeline
+
+1. **Ingestion**: Extract text from PDFs using OCR-aware extraction
+2. **Chunking**: Divide papers into semantic units (~512 tokens)
+3. **Embedding**: Convert chunks to vector representations (512-dim)
+4. **Indexing**: Store in pgvector for similarity search
+5. **Metadata**: Preserve source (title, authors, publication date, page number)
+
+### Citation Extraction & Verification
+
+When an answer is generated, VeriRAG traces it back to source:
+```
+Answer: "Semantic chunking divides documents by meaning, not fixed length."
+
+Citation: 
+- Source: "Langchain Documentation"
+- Location: "Section 3.2, Page 8"
+```
+
+VeriRAG validates that citations actually support the claim by checking semantic overlap between the answer and the retrieved text.
+
+**Assumption**: Citation validation uses embedding similarity. Perfect accuracy requires manual verification for publication-grade work.
+
+---
+
+## 📖 Example Research Sessions
+
+### Session 1: Valid Question (Should Answer)
+
+```
+Q: "What is semantic chunking according to the papers?"
+
+System retrieval:
+→ Found 3 relevant sections (similarity: 0.88, 0.79, 0.75)
+→ Top result: "Semantic chunking divides text by meaning..."
+→ Confidence: HIGH (0.88 ≥ 0.6 threshold)
+
+Answer:
+"Semantic chunking divides documents into logical units based on meaning 
+rather than fixed token counts. This approach preserves contextual 
+relationships and improves retrieval quality in RAG systems.
+
+Sources:
+[1] Langchain - Semantic Chunking Guide, Section 3.2
+[2] Research Paper X - Methods, Page 12"
+
+Status: ✅ GROUNDED (verified against source material)
+```
+
+### Session 2: Insufficient Evidence (Should Reject)
+
+```
+Q: "How does the system handle quantum-resistant cryptography?"
+
+System retrieval:
+→ Found 1 loosely related section (similarity: 0.35)
+→ Confidence: LOW (0.35 < 0.6 threshold)
+
+Answer:
+"I cannot answer this question reliably. Your uploaded papers do not 
+contain sufficient information about quantum-resistant cryptography. 
+Please upload papers specifically addressing this topic."
+
+Status: ❌ REJECTED (honest about knowledge limits)
+```
+
+---
+
+## 🧪 Evaluation & Grounding
+
+### What Gets Tracked
+
+For every query, VeriRAG logs:
+
+```json
+{
+  "query": "What is RAG?",
+  "timestamp": "2024-01-15T10:32:01Z",
+  "retrieval": {
+    "papers_searched": 42,
+    "chunks_returned": 10,
+    "top_similarity": 0.94,
+    "relevance_distribution": [0.94, 0.87, 0.81, ...]
+  },
+  "verification": {
+    "faithfulness_score": 0.92,
+    "all_claims_cited": true,
+    "verification_passed": true
+  },
+  "response": {
+    "answer": "RAG is Retrieval-Augmented Generation...",
+    "citations": ["Source A", "Source B"],
+    "confidence": 0.92,
+    "method": "DIRECT_RETRIEVAL"
+  }
+}
+```
+
+### Evaluation Metrics (RAG-Specific)
+
+**Context Relevance**: Are retrieved chunks actually relevant to the query?
+- Measured: Semantic similarity of top-k chunks
+- Target: ≥ 0.70 average similarity
+
+**Faithfulness**: Is the answer grounded in retrieved content?
+- Measured: Embedding cosine similarity (answer vs. context)
+- Target: ≥ 0.60 (prevents hallucinations)
+
+**Citation Correctness**: Do citations actually support claims?
+- Measured: Manual validation
+- Target: 100% of claims traceable to source
+
+**Rejection Accuracy**: When system rejects, is it justified?
+- Measured: Manual review of rejected queries
+- Target: <5% false rejections
+
+Every 100 queries, VeriRAG generates a report (`RAG_EVAL_LOG/`) with these metrics.
+
+---
+
+## 🏗 Architecture (Research-Oriented)
+
+### Core Components
+
+```
+Research Interface (React)
+        ↓
+  REST API (Django)
+        ↓
+RAG Pipeline Engine
+├─ [Retrieve] pgvector search
+├─ [Rank] Similarity scoring
+├─ [Synthesize] LLM generation
+├─ [Verify] Faithfulness check
+└─ [Format] Citation extraction
+        ↓
+Embedding Model (Google)
+Vector Store (PostgreSQL+pgvector)
+LLM APIs (Gemini, Groq)
+Redis Cache
+```
+
+### Technology Choices
+
+| Component | Technology | Why |
+|-----------|-----------|-----|
+| **Embeddings** | Google text-embedding-004 | Proven on academic texts |
+| **Vector Store** | PostgreSQL + pgvector | Self-hosted, reproducible |
+| **LLM** | Google Gemini 1.5 Flash | Fast, cost-effective |
+| **Fallback** | Groq Llama-3 8B | Open source, transparent |
+| **Caching** | Redis | Reduces API costs |
+
+---
+
+## ⚠️ Research Limitations
+
+### What This System Cannot Do
+
+1. **No live web search**: Only answers from uploaded papers
+2. **No fine-tuning**: Uses general-purpose embeddings
+3. **Limited reasoning**: Single-paper synthesis, not multi-paper
+4. **Semantic chunking**: 512-token fixed chunks may fragment long sections
+
+### External Dependencies
+
+- **Google API**: Embedding and LLM generation (required)
+- **PostgreSQL**: Vector store must be running (required)
+- **arXiv/Semantic Scholar APIs** (optional, if enabled)
+
+### Verification Assumptions
+
+- Semantic similarity ≠ semantic correctness (embedding-based verification may miss subtle errors)
+- Citation extraction is heuristic-based (some citations may be missed)
+- No ground truth validation (system doesn't know if papers contain errors)
+
+---
+
+## 🔮 Research Directions (Future Work)
+
+### High Priority
+- **Hybrid Retrieval**: Combine semantic search (vectors) + keyword search (BM25)
+- **Smart Chunking**: Intelligent segmentation by section/paragraph
+- **Citation Ranking**: Prioritize by relevance and authority
+
+### Medium Priority
+- **Multi-Paper Synthesis**: Answer that synthesizes across papers
+- **Literature Mapping**: Identify connections between papers
+- **Temporal Analysis**: Track how ideas evolve across years
+
+### Lower Priority (Exploratory)
+- **Claim Extraction**: Automatically identify key claims in papers
+- **Contradiction Detection**: Flag inconsistent findings
+- **Meta-Analysis Support**: Assist in quantitative synthesis
+
+---
+
+## 🛠 Local Development
 
 ### Prerequisites
+```bash
+Docker Desktop          # For containerized services
+Python 3.9+           # Backend runtime
+Node.js 18+           # Frontend runtime
+```
 
-- Docker & Docker Compose
-- Google API Key (Gemini + Embeddings) — [Get here](https://aistudio.google.com/app/apikey)
-- Groq API Key (optional fallback) — [Get here](https://console.groq.com/)
-- Node.js 18+ (frontend)
-- (Optional) Google & GitHub OAuth credentials for social sign-in
+### Quick Start
+```bash
+# 1. Clone
+git clone https://github.com/VaibhavKumar2005/cloud-native-ai-library-system.git
 
-### Setup
+# 2. Configure
+cp .env.example .env
+# Edit .env: GOOGLE_API_KEY, GROQ_API_KEY
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/VaibhavKumar2005/cloud-native-ai-library-system.git
-   cd cloud-native-ai-library-system
-   ```
+# 3. Launch
+docker-compose up --build
 
-2. **Create `.env` file:**
-   ```env
-   DJANGO_SECRET_KEY=your-secret-key
-   GOOGLE_API_KEY=your-google-key
-   GROQ_API_KEY=your-groq-key
-   POSTGRES_USER=admin
-   POSTGRES_PASSWORD=devpassword
-   POSTGRES_DB=verirag_db
-   POSTGRES_HOST=rag-db
-   POSTGRES_PORT=5432
-   REDIS_URL=redis://rag-redis:6379/0
-   DEBUG=True
-   ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,backend
-   
-   # OAuth (optional)
-   GOOGLE_CLIENT_ID=your-google-client-id
-   GOOGLE_CLIENT_SECRET=your-google-secret
-   GITHUB_CLIENT_ID=your-github-client-id
-   GITHUB_CLIENT_SECRET=your-github-secret
-   ```
-
-3. **Start infrastructure:**
-   ```bash
-   docker-compose up -d --build
-   ```
-
-4. **Run migrations:**
-   ```bash
-   docker exec -it rag-backend python manage.py migrate
-   docker exec -it rag-backend python manage.py createsuperuser
-   ```
-
-5. **Start frontend:**
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+# 4. Verify
+python demo_rag_test.py
+```
 
 ### Access Points
-
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:5173 |
-| Backend API | http://localhost:8000 |
-| Django Admin | http://localhost:8000/admin |
-| API Docs | http://localhost:8000/api/schema/swagger-ui |
-
-### OAuth Setup
-
-See [Google & GitHub OAuth Setup Guide](docs/OAUTH_SETUP_GUIDE.md) for complete authentication configuration.
+```
+Frontend:    http://localhost:5173
+Backend API: http://localhost:8000/api/
+Database:    localhost:5432
+```
 
 ---
 
-## Project Structure
+## ☁️ Deployment (Azure)
+
+For production use, VeriRAG deploys on Azure Container Apps with Terraform IaC.
+
+**Budget**: ~$97/month (PostgreSQL, Redis, Container Apps)
+
+See [docs/deployment.md](docs/deployment.md) for setup.
+
+---
+
+## 📂 Project Structure
 
 ```
-cloud-native-ai-library-system/
+.
 ├── apps/
-│   ├── backend/                    # Django REST API
-│   │   ├── ai_engine/              # RAG engine + verification
-│   │   │   ├── rag_logic.py        # Core dual-agent pipeline
-│   │   │   ├── academic_views.py   # Academic paper discovery & RAG
-│   │   │   ├── auth_views.py       # OAuth & authentication endpoints
-│   │   │   ├── views.py            # Core API endpoints
-│   │   │   ├── models.py           # Database models (Papers, Users, etc.)
-│   │   │   ├── tasks.py            # Celery async tasks
-│   │   │   └── rag_logic.py        # Academic RAG pipeline
-│   │   ├── mcp_server.py           # FastAPI RAG backend (optional)
-│   │   └── requirements.txt
-│   └── frontend/                   # React + Vite app
-│       ├── src/
-│       │   └── components/         # Command palette, search, auth UI
-│       └── package.json
-├── ops/
-│   ├── infrastructure/             # Terraform (Azure)
-│   └── k8s/                        # Kubernetes manifests
-├── scripts/
-│   ├── demo/                       # Demo scripts
-│   ├── setup/                      # Setup & initialization scripts
-│   └── testing/                    # Test scripts
-├── docs/
-│   ├── guides/                     # Deployment guides
-│   ├── OAUTH_SETUP_GUIDE.md        # Google & GitHub OAuth setup
-│   ├── ARCHITECTURE.md             # System design details
-│   └── README.md                   # Detailed documentation
-├── docker-compose.yml              # Local dev orchestration
-└── README.md                        # This file
+│   ├── backend/        # Django RAG engine
+│   │   └── ai_engine/  # Core verification logic
+│   └── frontend/       # React interface
+├── docs/               # Technical documentation
+├── tests/              # Evaluation tests
+└── ops/                # Infrastructure (Terraform)
 ```
 
 ---
 
-## Core Features
+## 📚 Documentation
 
-### Document RAG
-
-Query your PDF library with verified, citation-backed answers:
-```bash
-curl -X POST http://localhost:8000/api/documents/ask/ \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What are the key findings?"}'
-```
-
-### Academic Research Discovery
-
-Search and analyze academic papers across Semantic Scholar, arXiv, CrossRef:
-```bash
-curl -X POST http://localhost:8000/api/papers/search/ \
-  -H "Content-Type: application/json" \
-  -d '{"query": "machine learning", "source": "arxiv"}'
-```
-
-Features:
-- 🔍 **Paper Search** — Query across multiple academic sources
-- 📚 **Personal Library** — Organize and manage research papers
-- 🔬 **Gap Analysis** — Identify research gaps and opportunities
-- 💡 **Topic Recommendations** — Get smart topic suggestions based on your research
-- ❓ **RAG Q&A** — Ask questions about papers with citation references
-
-### Authentication & Authorization
-
-- **Passwordless Email Login** — Sign in with email
-- **OAuth 2.0 Social Sign-In** — Google & GitHub authentication
-- **Secure Token Exchange** — Industry-standard OAuth flow
+- **[RAG Pipeline](docs/rag_pipeline.md)**: Algorithm details and verification logic
+- **[Evaluation Framework](docs/evaluation.md)**: Testing methodology and metrics
+- **[Deployment Guide](docs/deployment.md)**: Azure setup and monitoring
 
 ---
 
-## Testing
+## 📜 License & Citation
 
-```bash
-cd apps/backend
-pytest tests/ -v --tb=short
-pytest tests/ --cov=ai_engine --cov-report=html
+MIT License – see [LICENSE](LICENSE).
+
+**For research use:**
+```bibtex
+@software{verirag2024,
+  title={VeriRAG: Verified Research Assistant},
+  author={Kumar, Vaibhav},
+  year={2024},
+  url={https://github.com/VaibhavKumar2005/cloud-native-ai-library-system}
+}
 ```
 
 ---
 
-## Kubernetes Deployment
+## 🤝 Contributing
 
-```bash
-# Apply manifests
-kubectl apply -k ops/k8s/
+Contributions welcome in these areas:
+- Improving retrieval quality
+- Better verification methods
+- Evaluation methodologies
+- Documentation
 
-# Verify pods
-kubectl get pods -n verirag
-
-# View logs
-kubectl logs -n verirag deployment/rag-backend --tail=50
-```
+Please open issues before submitting large PRs.
 
 ---
 
-## AI Engine Documentation
-
-Detailed documentation available in the `docs/` directory:
-- **Deployment Guides** — `docs/guides/` for ACA, Kubernetes, and local setup
-- **Architecture Details** — See `docs/guides/` for system design documentation
-- **API Reference** — See backend Swagger docs at `/api/schema/swagger-ui/`
-- **OAuth Setup** — [docs/OAUTH_SETUP_GUIDE.md](docs/OAUTH_SETUP_GUIDE.md)
-
----
-
-## Recent Improvements
-
-### Security & Infrastructure
-- ✅ Trivy vulnerability scanning & remediation in CI/CD
-- ✅ Latest patched base images (Python 3.12, Alpine 3.21)
-- ✅ OIDC authentication for Azure Container Registry
-- ✅ Consolidated CI/CD workflows (10 → 4 lean pipelines)
-
-### Performance & Features
-- ✅ Academic RAG system with multiple source integrations
-- ✅ FastAPI backend alternative for high-performance scenarios
-- ✅ Enhanced frontend UX with command palette
-- ✅ Optimized local development environment
-- ✅ Comprehensive budget & deployment guides
-
-### Documentation
-- ✅ OAuth setup guide for Google & GitHub
-- ✅ Terraform budget optimization guide
-- ✅ Local dev environment guide
-- ✅ Cleaned up and consolidated documentation
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit changes: `git commit -am "Add feature"`
-4. Push to branch: `git push origin feature/your-feature`
-5. Open a pull request
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details
-
----
-
-**Built for the Azure Cloud-Native Hackathon | Team 96
+**Status**: Active Research Project | **License**: MIT

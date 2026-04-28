@@ -638,35 +638,66 @@ def query_academic_rag(query: str) -> dict:
         span.set_attribute("query", query)
         
         vector_db = get_vector_store()
+        top_k = int(os.environ.get("RAG_TOP_K", "5"))
+        min_relevance = float(os.environ.get("RAG_MIN_RELEVANCE", "0.20"))
         
         with tracer.start_as_current_span("similarity_search"):
-            chunks = vector_db.similarity_search(query, k=3)
+            retrieval_results = []
+            try:
+                scored_chunks = vector_db.similarity_search_with_relevance_scores(query, k=top_k)
+                retrieval_results = [
+                    (chunk, float(score))
+                    for chunk, score in scored_chunks
+                    if score is None or float(score) >= min_relevance
+                ]
+            except Exception as exc:
+                logger.warning("Scored retrieval failed, falling back to similarity_search: %s", exc)
+                retrieval_results = [(chunk, None) for chunk in vector_db.similarity_search(query, k=top_k)]
+
+        chunks = [chunk for chunk, _ in retrieval_results]
 
         if not chunks:
             span.set_attribute("result", "no_results")
             return {
                 "status": "rejected",
                 "message": "No reliable evidence found",
+                "confidence": 0.0,
+                "confidence_label": "none",
+                "retrieval": {
+                    "top_k": top_k,
+                    "min_relevance": min_relevance,
+                    "chunks_returned": 0,
+                },
             }
 
         context_blocks = []
         sources = []
-        for index, chunk in enumerate(chunks, start=1):
+        relevance_scores = []
+        for index, (chunk, relevance_score) in enumerate(retrieval_results, start=1):
             metadata = chunk.metadata or {}
             title = metadata.get("document_title") or metadata.get("source") or "Document"
             page = metadata.get("page", metadata.get("page_number"))
+            if relevance_score is not None:
+                relevance_scores.append(relevance_score)
 
             context_blocks.append(f"[Source {index}: {title}, page {page}]\n{chunk.page_content}")
             sources.append(
                 {
                     "source_index": index,
                     "title": title,
+                    "source": metadata.get("source") or "vector_db",
                     "page": page,
                     "excerpt": chunk.page_content[:300],
+                    "relevance": round(relevance_score, 3) if relevance_score is not None else None,
                 }
             )
 
         context = "\n\n---\n\n".join(context_blocks)
+        retrieval_confidence = (
+            sum(relevance_scores) / len(relevance_scores)
+            if relevance_scores
+            else min(0.85, 0.45 + (len(chunks) * 0.1))
+        )
         
         with tracer.start_as_current_span("generate_answer"):
             answer = _generate_answer_from_context(query=query, context=context)
@@ -676,14 +707,31 @@ def query_academic_rag(query: str) -> dict:
             return {
                 "status": "rejected",
                 "message": "No reliable evidence found",
+                "confidence": round(min(retrieval_confidence, 0.35), 2),
+                "confidence_label": "low",
+                "sources": sources,
+                "retrieval": {
+                    "top_k": top_k,
+                    "min_relevance": min_relevance,
+                    "chunks_returned": len(chunks),
+                },
             }
 
         span.set_attribute("result", "success")
         span.set_attribute("source_count", len(sources))
+        confidence = max(0.0, min(1.0, retrieval_confidence))
+        confidence_label = "high" if confidence >= 0.75 else "medium" if confidence >= 0.5 else "low"
         return {
             "status": "success",
             "answer": answer,
             "sources": sources,
+            "confidence": round(confidence, 2),
+            "confidence_label": confidence_label,
+            "retrieval": {
+                "top_k": top_k,
+                "min_relevance": min_relevance,
+                "chunks_returned": len(chunks),
+            },
         }
 
 
@@ -907,6 +955,13 @@ def get_verified_answer(query, user_id, request_context=None):
     QUERIES_TOTAL.inc()
     request_context = request_context or {}
     query_id = request_context.get("query_id")
+    start_time = time.time()
+    evaluation_log = {
+        "query": query,
+        "retrieved_chunks": [],
+        "trace_id": get_trace_id() or "",
+        "query_id": query_id,
+    }
 
     with trace_context(
         "rag.query.pipeline",
@@ -935,13 +990,23 @@ def get_verified_answer(query, user_id, request_context=None):
                 },
             ):
                 # Use cached vector store to reuse connection pool
+                top_k = 5
                 vector_db = get_vector_store()
 
                 docs = vector_db.similarity_search(
                     query,
-                    k=5,
+                    k=top_k,
                     filter={"user_id": str(user_id)}
                 )
+                evaluation_log["top_k"] = top_k
+                evaluation_log["retrieved_chunks"] = [
+                    {
+                        "text": doc.page_content[:200],
+                        "score": (doc.metadata or {}).get("score"),
+                        "source": (doc.metadata or {}).get("document_title"),
+                    }
+                    for doc in docs
+                ]
                 add_span_attributes(
                     {
                         "rag.retrieval.result_count": len(docs),
@@ -954,6 +1019,14 @@ def get_verified_answer(query, user_id, request_context=None):
                 )
 
             if not docs:
+                evaluation_log["answer"] = (
+                    "I couldn't find any relevant information in your uploaded documents. "
+                    "Please upload a document first or rephrase your question."
+                )
+                evaluation_log["status"] = "rejected"
+                evaluation_log["model"] = "none"
+                evaluation_log["latency_ms"] = int((time.time() - start_time) * 1000)
+                logger.warning("RAG_EVAL_LOG=%s", json.dumps(evaluation_log))
                 return {
                     "answer": "I couldn't find any relevant information in your uploaded documents. Please upload a document first or rephrase your question.",
                     "faithfulness_score": 0.0,
@@ -1007,6 +1080,11 @@ def get_verified_answer(query, user_id, request_context=None):
                     response_data = json.loads(clean_json)
             except json.JSONDecodeError as e:
                 logger.error(f"JSON parsing failed: {e}. Raw response: {response_text[:500]}")
+                evaluation_log["answer"] = "Error parsing AI response. Please try again."
+                evaluation_log["status"] = "rejected"
+                evaluation_log["model"] = model_used
+                evaluation_log["latency_ms"] = int((time.time() - start_time) * 1000)
+                logger.error("RAG_EVAL_LOG=%s", json.dumps(evaluation_log))
                 return {
                     "answer": "Error parsing AI response. Please try again.",
                     "citations": [],
@@ -1168,10 +1246,25 @@ CRITICAL: Every factual claim MUST have a citation [N]. If you cannot cite it, d
                         "rag.evaluation.faithfulness": ragas_scores.get("faithfulness", 0.5),
                     },
                 )
+                evaluation_log["answer"] = final_response.get("answer")
+                evaluation_log["status"] = (
+                    "success" if final_response.get("verification_passed") else "rejected"
+                )
+                evaluation_log["model"] = model_used
+                evaluation_log["latency_ms"] = int((time.time() - start_time) * 1000)
+                if final_response.get("verification_passed"):
+                    logger.info("RAG_EVAL_LOG=%s", json.dumps(evaluation_log))
+                else:
+                    logger.warning("RAG_EVAL_LOG=%s", json.dumps(evaluation_log))
                 return final_response
 
         except Exception as e:
             logger.error(f"❌ Verification engine error: {str(e)}")
+            evaluation_log["answer"] = "An internal error occurred while processing your question."
+            evaluation_log["status"] = "rejected"
+            evaluation_log["model"] = "none"
+            evaluation_log["latency_ms"] = int((time.time() - start_time) * 1000)
+            logger.error("RAG_EVAL_LOG=%s", json.dumps(evaluation_log))
             return {
                 "answer": "An internal error occurred while processing your question.",
                 "faithfulness_score": 0.0,

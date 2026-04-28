@@ -3,8 +3,37 @@
  * Handles all API calls for the research interface
  */
 
-const API_ROOT = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const trimTrailingSlash = (value) => value.replace(/\/+$/, '');
+
+const API_ROOT = trimTrailingSlash(import.meta.env.VITE_API_URL || '');
 const API_BASE = `${API_ROOT}/api`;
+
+async function parseJsonResponse(response, fallbackMessage) {
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const detail = data?.detail || data?.error || data?.message || response.statusText || fallbackMessage;
+    throw new Error(`${fallbackMessage}: ${detail}`);
+  }
+
+  return data;
+}
+
+export async function checkBackendHealth() {
+  const response = await fetch(`${API_BASE}/health/`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  return parseJsonResponse(response, 'Health check failed');
+}
 
 /**
  * Search for academic papers from Semantic Scholar/arXiv
@@ -26,11 +55,7 @@ export async function searchAcademicPapers(query, limit = 10) {
       }
     );
     
-    if (!response.ok) {
-      throw new Error(`Search failed: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
+    const data = await parseJsonResponse(response, 'Search failed');
     return data.papers || [];
   } catch (error) {
     console.error('Search error:', error);
@@ -57,11 +82,7 @@ export async function queryAcademicRAG(query, sessionPaperIds = []) {
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Query failed: ${response.statusText}`);
-    }
-
-    return await response.json();
+    return await parseJsonResponse(response, 'Query failed');
   } catch (error) {
     console.error('Query error:', error);
     throw error;
@@ -84,11 +105,7 @@ export async function ingestAcademicPaper(paperData) {
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Ingest failed: ${response.statusText}`);
-    }
-
-    return await response.json();
+    return await parseJsonResponse(response, 'Ingest failed');
   } catch (error) {
     console.error('Ingest error:', error);
     throw error;
@@ -110,11 +127,7 @@ export async function getMyLibrary() {
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Fetch failed: ${response.statusText}`);
-    }
-
-    const data = await response.json();
+    const data = await parseJsonResponse(response, 'Fetch failed');
     return Array.isArray(data) ? data : data.documents || [];
   } catch (error) {
     console.error('Library fetch error:', error);
@@ -137,11 +150,7 @@ export async function searchLocalDocuments(query) {
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Search failed: ${response.statusText}`);
-    }
-
-    const data = await response.json();
+    const data = await parseJsonResponse(response, 'Search failed');
     return Array.isArray(data) ? data : data.documents || [];
   } catch (error) {
     console.error('Document search error:', error);
@@ -166,11 +175,7 @@ export async function uploadDocument(file) {
       }
     );
 
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`);
-    }
-
-    return await response.json();
+    return await parseJsonResponse(response, 'Upload failed');
   } catch (error) {
     console.error('Upload error:', error);
     throw error;

@@ -5,7 +5,7 @@ import { AlertCircle, Loader2, Mail, CheckCircle, Lock } from "lucide-react";
 import axios from "axios";
 import { colors } from "@/lib/colors";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export default function EmailAuthForm({ onSuccess, onError }) {
   const [email, setEmail] = useState("");

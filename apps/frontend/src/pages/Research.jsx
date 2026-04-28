@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -6,11 +6,12 @@ import {
   Database,
   FileText,
   FileUp,
+  Loader2,
   Search,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import { queryAcademicRAG } from '../api/research';
+import { checkBackendHealth, queryAcademicRAG, uploadDocument } from '../api/research';
 import AnswerPanel from '../components/AnswerPanel';
 import '../styles/Research.css';
 import '../styles/Components.css';
@@ -25,7 +26,33 @@ export default function Research() {
   const [query, setQuery] = useState('');
   const [answer, setAnswer] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [backendHealth, setBackendHealth] = useState({ state: 'checking', label: 'Checking backend' });
+  const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
   const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+
+    checkBackendHealth()
+      .then((health) => {
+        if (!active) return;
+        setBackendHealth({
+          state: health.healthy ? 'healthy' : 'degraded',
+          label: health.healthy ? 'Backend connected' : 'Backend degraded',
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setBackendHealth({
+          state: 'offline',
+          label: 'Backend offline',
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleAsk = useCallback(async (nextQuery = query) => {
     const cleanQuery = nextQuery.trim();
@@ -44,12 +71,42 @@ export default function Research() {
     } catch (error) {
       setAnswer({
         status: 'rejected',
-        message: 'Unable to reach the RAG backend. Start Django and try again.',
+        message: error.message || 'Unable to reach the RAG backend. Start Django and try again.',
+      });
+      setBackendHealth({
+        state: 'offline',
+        label: 'Backend offline',
       });
     } finally {
       setLoading(false);
     }
   }, [query]);
+
+  const handleUpload = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadState({ status: 'uploading', message: `Uploading ${file.name}` });
+
+    try {
+      const document = await uploadDocument(file);
+      setUploadState({
+        status: 'queued',
+        message: `${document.title || file.name} queued for indexing`,
+      });
+      setHistory((items) => [
+        { query: `Uploaded ${file.name}`, status: document.status || 'queued', time: new Date().toLocaleTimeString() },
+        ...items,
+      ].slice(0, 4));
+    } catch (error) {
+      setUploadState({
+        status: 'error',
+        message: error.message || 'Upload failed',
+      });
+    } finally {
+      event.target.value = '';
+    }
+  }, []);
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter') {
@@ -126,16 +183,17 @@ export default function Research() {
             <span className="eyebrow">Live workspace</span>
             <h2>Ask grounded questions, then inspect the evidence.</h2>
           </div>
-          <span className="status-pill">
-            <CheckCircle2 size={16} /> Public demo mode
+          <span className={`status-pill ${backendHealth.state}`}>
+            {backendHealth.state === 'checking' ? <Loader2 size={16} className="spin" /> : <CheckCircle2 size={16} />}
+            {backendHealth.label}
           </span>
         </div>
 
         <div className="metrics-row">
           <div className="metric-card">
             <span>Documents</span>
-            <strong>Vector DB</strong>
-            <small>Top 3 chunks retrieved</small>
+            <strong>Indexing</strong>
+            <small>PDF upload, chunk, embed, store</small>
           </div>
           <div className="metric-card">
             <span>Verification</span>
@@ -144,8 +202,8 @@ export default function Research() {
           </div>
           <div className="metric-card">
             <span>Auth</span>
-            <strong>Disabled</strong>
-            <small>Demo opens instantly</small>
+            <strong>Demo</strong>
+            <small>Open workspace with isolated demo user</small>
           </div>
         </div>
 
@@ -155,14 +213,15 @@ export default function Research() {
               <FileText size={20} />
               <div>
                 <h3>Document Library</h3>
-                <p>Upload flow can return after the demo.</p>
+                <p>Index PDFs into the retrieval store.</p>
               </div>
             </div>
-            <div className="upload-placeholder">
-              <FileUp size={34} />
-              <strong>Ready for indexed PDFs</strong>
-              <span>For now, query the existing vector store directly.</span>
-            </div>
+            <label className={`upload-placeholder upload-dropzone ${uploadState.status}`}>
+              {uploadState.status === 'uploading' ? <Loader2 size={34} className="spin" /> : <FileUp size={34} />}
+              <strong>{uploadState.status === 'idle' ? 'Upload research PDF' : uploadState.message}</strong>
+              <span>Files are queued for offline indexing, then become searchable from chat.</span>
+              <input type="file" accept="application/pdf,.pdf" onChange={handleUpload} disabled={uploadState.status === 'uploading'} />
+            </label>
             <div className="next-actions">
               <p>Demo script</p>
               {demoPrompts.map((prompt) => (
@@ -217,8 +276,8 @@ export default function Research() {
               </div>
             </div>
             <div className="health-list">
-              <span><CheckCircle2 size={16} /> Retrieval active</span>
-              <span><CheckCircle2 size={16} /> Sources returned</span>
+              <span><CheckCircle2 size={16} /> Backend health checked</span>
+              <span><CheckCircle2 size={16} /> Confidence returned</span>
               <span><AlertTriangle size={16} /> Unsupported answers rejected</span>
             </div>
             {history.length > 0 && (

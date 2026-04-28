@@ -149,6 +149,8 @@ IS_PRODUCTION = DEPLOY_MODE == 'cloud'
 # ⚠️ SECURITY WARNING: Only use in non-production environments!
 # TODO: Remove after May 1st, 2026
 DEMO_MODE = env_bool('DEMO_MODE', default=False)
+INGEST_SYNC_ON_UPLOAD = env_bool('INGEST_SYNC_ON_UPLOAD', default=False)
+INGEST_SYNC_FALLBACK = env_bool('INGEST_SYNC_FALLBACK', default=True)
 
 SECRET_KEY = os.environ.get(
     'DJANGO_SECRET_KEY',
@@ -384,12 +386,24 @@ SPECTACULAR_SETTINGS = {
 }
 
 # --- 5. NETWORKING (CORS & CSP) ---
-CORS_ALLOW_ALL_ORIGINS = DEBUG
+_configured_cors_origins = [
+    host.strip()
+    for host in os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',')
+    if host.strip()
+]
+_local_cors_origins = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+if FRONTEND_URL:
+    _local_cors_origins.append(FRONTEND_URL)
+
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = sorted(set(_configured_cors_origins + ([] if IS_PRODUCTION else _local_cors_origins)))
 
 if IS_PRODUCTION:
-    CORS_ALLOWED_ORIGINS = [
-        host.strip() for host in os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',') if host
-    ]
     if not CORS_ALLOWED_ORIGINS:
         raise ValueError("CORS_ALLOWED_ORIGINS must be set in production.")
 

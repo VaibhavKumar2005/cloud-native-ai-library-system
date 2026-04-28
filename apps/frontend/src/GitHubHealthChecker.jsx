@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { createElement, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -39,11 +39,11 @@ function analyzeRepoInput(value) {
   })
 }
 
-function StatPill({ icon: Icon, value, label }) {
+function StatPill({ icon, value, label }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
       <div className="flex items-center gap-2 text-sm text-slate-100">
-        <Icon className="h-4 w-4 text-cyan-300" />
+        {createElement(icon, { className: 'h-4 w-4 text-cyan-300' })}
         <span className="font-semibold">{value}</span>
       </div>
       <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">{label}</div>

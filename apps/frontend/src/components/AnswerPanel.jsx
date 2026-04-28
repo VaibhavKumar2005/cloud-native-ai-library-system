@@ -34,11 +34,18 @@ export default function AnswerPanel({ answer }) {
   return (
     <div className="answer-panel success">
       <div className="answer-header">
-        <h4>✨ Answer</h4>
+        <h4>Answer</h4>
         <div className="answer-meta">
           <span className="confidence">
-            {answer.confidence && `${Math.round(answer.confidence * 100)}% confident`}
+            {typeof answer.confidence === 'number'
+              ? `${Math.round(answer.confidence * 100)}% ${answer.confidence_label || 'confidence'}`
+              : answer.confidence_label || 'confidence pending'}
           </span>
+          {answer.retrieval?.chunks_returned > 0 && (
+            <span className="source-count">
+              {answer.retrieval.chunks_returned}/{answer.retrieval.top_k} chunks used
+            </span>
+          )}
           {answer.sources?.length > 0 && (
             <span className="source-count">
               Based on {answer.sources.length} source{answer.sources.length !== 1 ? 's' : ''}
@@ -53,7 +60,7 @@ export default function AnswerPanel({ answer }) {
 
       {answer.sources && answer.sources.length > 0 && (
         <div className="answer-sources">
-          <p className="sources-label">📚 Sources cited:</p>
+          <p className="sources-label">Sources cited</p>
           <div className="sources-list">
             {answer.sources.map((src, idx) => (
               <div key={idx} className="source-item">
@@ -67,7 +74,7 @@ export default function AnswerPanel({ answer }) {
                 </a>
                 <div className="source-info">
                   <span className="source-type">{src.source}</span>
-                  {src.score && <span className="source-score">{Math.round(src.score * 100)}%</span>}
+                  {typeof src.relevance === 'number' && <span className="source-score">{Math.round(src.relevance * 100)}% match</span>}
                 </div>
                 {src.excerpt && <p className="source-excerpt">"{src.excerpt}"</p>}
               </div>

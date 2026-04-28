@@ -10,7 +10,7 @@ import { clearSession } from './lib/auth';
 
 // ── Auth Guard: In DEMO_MODE, skip all auth checks ──────────
 // For demo/testing, bypass the login requirement entirely
-function ProtectedRoute({ children, adminOnly = false }) {
+function ProtectedRoute({ children }) {
   // DEMO MODE: Always allow access, skip auth checks
   return children;
 }

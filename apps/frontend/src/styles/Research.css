@@ -238,6 +238,19 @@
   white-space: nowrap;
 }
 
+.status-pill.offline {
+  border-color: rgba(248, 113, 113, 0.30);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.28);
+}
+
+.status-pill.degraded,
+.status-pill.checking {
+  border-color: rgba(251, 191, 36, 0.28);
+  color: #fde68a;
+  background: rgba(120, 53, 15, 0.26);
+}
+
 .metrics-row {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 18px;
@@ -291,6 +304,39 @@
 
 .upload-placeholder {
   gap: 10px;
+}
+
+.upload-dropzone {
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.upload-dropzone:hover {
+  border-color: rgba(34, 211, 238, 0.44);
+  background: rgba(8, 47, 73, 0.24);
+}
+
+.upload-dropzone input {
+  display: none;
+}
+
+.upload-dropzone.error {
+  border-color: rgba(248, 113, 113, 0.36);
+  color: #fecaca;
+}
+
+.upload-dropzone.queued {
+  border-color: rgba(52, 211, 153, 0.34);
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .next-actions,

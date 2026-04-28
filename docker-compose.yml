@@ -79,14 +79,13 @@ services:
     command: >
       sh -c 'python manage.py migrate --no-input &&
              python setup_pgvector.py &&
-             python manage.py runserver 0.0.0.0:8000 --noreload'
+             gunicorn rag_backend.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60 --access-logfile - --error-logfile -'
     volumes:
-      - ./apps/backend:/app
       - media_data:/app/media
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - .env.dev
     environment:
       - DJANGO_SETTINGS_MODULE=rag_backend.settings
       - DEBUG=True
@@ -116,10 +115,9 @@ services:
     # FIX: Removed user: "0:0" to avoid running as root [cite: 197]
     command: celery -A rag_backend worker -l info -Q celery,ingestion,monitoring,maintenance
     volumes:
-      - ./apps/backend:/app
       - media_data:/app/media
     env_file:
-      - .env
+      - .env.dev
     environment:
       - DJANGO_SETTINGS_MODULE=rag_backend.settings
       - POSTGRES_HOST=rag-db
@@ -150,10 +148,9 @@ services:
     # FIX: Removed user: "0:0" to avoid running as root [cite: 197]
     command: celery -A rag_backend beat -l info
     volumes:
-      - ./apps/backend:/app
       - celerybeat_schedule:/app/schedule
     env_file:
-      - .env
+      - .env.dev
     environment:
       - DJANGO_SETTINGS_MODULE=rag_backend.settings
       - REDIS_URL=redis://rag-redis:6379/0
@@ -180,7 +177,7 @@ services:
     build:
       context: ./apps/frontend
       args:
-        VITE_API_URL: http://localhost:8000
+        VITE_API_URL: ${VITE_API_URL}
         VITE_DEMO_MODE: "true"
     container_name: rag-frontend
     ports:
@@ -188,7 +185,7 @@ services:
     depends_on:
       - rag-backend
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "pidof nginx >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

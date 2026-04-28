@@ -277,6 +277,8 @@ backend/media/
 .env.production
 .env.development
 .env.test
+.env.dev
+.env.prod
 __pycache__/
 *.pyc
 .DS_Store

@@ -26,7 +26,7 @@ azure-search-documents>=11.4.0  # Azure AI Search vector search
 faiss-cpu>=1.8.0  # Local vector store for RAG
 pgvector>=0.3.6  # Python client for PostgreSQL pgvector extension
 psycopg2-binary==2.9.9
-sqlalchemy>=2.0.0  # Required for PostgreSQL ORM
+sqlalchemy>=2.0.49  # Required for PostgreSQL ORM
 azure-storage-blob>=12.19.0  # For document storage (alternative to local filesystem)
 
 # Experiment Tracking (MLflow)

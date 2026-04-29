@@ -42,6 +42,9 @@ variable "pg_admin_user" {
 variable "pg_admin_password" { sensitive = true }
 variable "django_secret_key" { sensitive = true }
 variable "acr_name" { default = "acrvaibhavrag2026" }
+variable "deploy_celery" { default = false }
+variable "aca_env_name" { default = "verirag-env" }
+variable "aca_env_location" { default = "westus2" }
 
 locals {
   resource_prefix = "${var.project_name}-${var.environment}"
@@ -91,6 +94,10 @@ resource "azurerm_postgresql_flexible_server" "pg" {
   storage_mb             = 32768
   sku_name               = "B_Standard_B1ms"
   tags                   = local.common_tags
+
+  lifecycle {
+    ignore_changes = [zone]
+  }
 }
 
 resource "azurerm_postgresql_flexible_server_configuration" "pgvector" {
@@ -126,10 +133,14 @@ resource "azurerm_redis_cache" "redis" {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 resource "azurerm_container_app_environment" "aca_env" {
-  name                       = "cae-${local.resource_prefix}"
-  location                   = azurerm_resource_group.rg.location
+  name                       = var.aca_env_name
+  location                   = var.aca_env_location
   resource_group_name        = azurerm_resource_group.rg.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.logs.id
+
+  lifecycle {
+    ignore_changes = [log_analytics_workspace_id]
+  }
 }
 
 # ── 4a. Backend API ──────────────────────────────────────────────────────────
@@ -214,6 +225,7 @@ resource "azurerm_container_app" "backend" {
 
 # ── 4b. Celery Worker ────────────────────────────────────────────────────────
 resource "azurerm_container_app" "celery_worker" {
+  count                        = var.deploy_celery ? 1 : 0
   name                         = "ca-${local.resource_prefix}-worker"
   container_app_environment_id = azurerm_container_app_environment.aca_env.id
   resource_group_name          = azurerm_resource_group.rg.name

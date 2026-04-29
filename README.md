@@ -14,6 +14,10 @@ Unlike general-purpose LLMs, VeriRAG operates under one core constraint: **it ca
 
 **Key distinction**: This is not a RAG chatbot for customer service. This is a research verification system designed for PhD-level work where citation accuracy is non-negotiable.
 
+### Product Positioning (One Line)
+
+**VeriRAG is a ChatGPT-style copilot for research papers, grounded in retrieved evidence instead of free-form guessing.**
+
 ---
 
 ## 🧠 The Research Problem
@@ -137,6 +141,22 @@ Please upload papers specifically addressing this topic."
 
 Status: ❌ REJECTED (honest about knowledge limits)
 ```
+
+---
+
+## 🎤 Demo Script (For Submission)
+
+Use this exact flow during your live demo:
+
+1. Open frontend: `http://localhost:5173`
+2. Search papers with: `self-supervised speech recognition wav2vec whisper`
+3. Ingest top 1-3 papers from search results
+4. Ask: `What is the key technical contribution across these papers?`
+5. Show one of two outcomes:
+   - Grounded answer with citations (when evidence exists)
+   - Honest rejection (when evidence is insufficient)
+
+This demonstrates the core value: **evidence-first AI for research workflows**.
 
 ---
 
@@ -292,6 +312,12 @@ docker-compose up --build
 # 4. Verify
 python demo_rag_test.py
 ```
+
+### Local Validation Snapshot
+
+- Frontend health: `http://localhost:5173` ✅
+- Backend health: `http://localhost:8000/api/health/` ✅
+- Query endpoint behavior: returns grounded answer or explicit rejection (no silent hallucination path) ✅
 
 ### Access Points
 ```

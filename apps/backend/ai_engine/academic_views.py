@@ -79,10 +79,11 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
         Creates both AcademicPaper (for discovery) and Document (for RAG)
         """
         paper_ids = request.data.get('paper_ids', [])
+        paper_payloads = request.data.get('papers', [])
         source = request.data.get('source', 'semantic-scholar')
         
-        if not paper_ids:
-            return Response({'error': 'paper_ids required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not paper_ids and not paper_payloads:
+            return Response({'error': 'paper_ids or papers required'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             from ai_engine.models import Document
@@ -91,14 +92,36 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
             ingested_count = 0
             document_ids = []
             
+            # Allow direct ingest from prior search payloads to avoid
+            # hard dependency on a second external API round-trip.
+            papers_to_ingest = []
+            for payload in paper_payloads:
+                if isinstance(payload, dict):
+                    payload_id = payload.get('id') or payload.get('paperId')
+                    if payload_id:
+                        papers_to_ingest.append((str(payload_id), payload))
+
             for paper_id in paper_ids:
-                paper_data = self._fetch_paper_details(paper_id, source)
+                papers_to_ingest.append((paper_id, None))
+
+            for paper_id, payload in papers_to_ingest:
+                paper_data = payload or self._fetch_paper_details(paper_id, source)
                 if paper_data:
+                    paper_data = dict(paper_data)
+                    # Normalize external search payload shape to model fields.
+                    payload_external_id = paper_data.pop('id', None) or paper_data.pop('paperId', None)
+                    paper_data.setdefault('external_id', payload_external_id or paper_id)
+                    paper_data.setdefault('publication_year', paper_data.pop('year', None))
+                    paper_data.setdefault('citation_count', paper_data.pop('citationCount', 0))
+                    paper_data.setdefault('source', source)
+
                     # Step 1: Create/update AcademicPaper (for discovery and tracking)
-                    academic_paper, created = AcademicPaper.objects.get_or_create(
-                        user=request.user,
+                    academic_paper, created = AcademicPaper.objects.update_or_create(
                         external_id=paper_id,
-                        defaults=paper_data
+                        defaults={
+                            **paper_data,
+                            'user': request.user,
+                        }
                     )
                     
                     # Step 2: Create Document (unified model for RAG)
@@ -143,7 +166,7 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
             
             return Response({
                 'ingested': ingested_count,
-                'total_requested': len(paper_ids),
+                'total_requested': len(papers_to_ingest),
                 'document_ids': document_ids,
                 'message': f'Successfully ingested {ingested_count} papers into RAG system'
             }, status=status.HTTP_202_ACCEPTED)  # 202 Accepted for async processing
@@ -196,11 +219,10 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Question is required'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            answer, sources, faithfulness = query_academic_rag(
-                question=question,
-                paper=paper,
-                user=request.user
-            )
+            rag_result = query_academic_rag(query=question)
+            answer = rag_result.get('answer') or rag_result.get('message', 'No answer generated')
+            sources = rag_result.get('sources', [])
+            faithfulness = rag_result.get('confidence', 0.0)
             
             # Log the Q&A
             qna = PaperQnA.objects.create(

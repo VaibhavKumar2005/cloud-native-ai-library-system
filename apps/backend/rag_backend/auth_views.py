@@ -7,6 +7,7 @@ from urllib.parse import urlencode, urlparse
 import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db import transaction
 from django.http import HttpResponseRedirect
@@ -675,52 +676,53 @@ class EmailLoginVerifyView(APIView):
         token_hash = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
 
         try:
-            # Find and consume token (one-time use)
-            email_token = EmailLoginToken.objects.select_for_update().filter(
-                token_hash=token_hash,
-            ).first()
+            with transaction.atomic():
+                # Find and consume token (one-time use)
+                email_token = EmailLoginToken.objects.select_for_update().filter(
+                    token_hash=token_hash,
+                ).first()
 
-            if not email_token:
-                return Response(
-                    {"detail": "Invalid or expired token."},
-                    status=HTTP_401_UNAUTHORIZED
-                )
+                if not email_token:
+                    return Response(
+                        {"detail": "Invalid or expired token."},
+                        status=HTTP_401_UNAUTHORIZED
+                    )
 
-            # Check expiration
-            if email_token.expires_at <= timezone.now():
-                return Response(
-                    {"detail": "Token has expired. Please request a new magic link."},
-                    status=HTTP_401_UNAUTHORIZED
-                )
+                # Check expiration
+                if email_token.expires_at <= timezone.now():
+                    return Response(
+                        {"detail": "Token has expired. Please request a new magic link."},
+                        status=HTTP_401_UNAUTHORIZED
+                    )
 
-            # Check if already used
-            if email_token.used_at is not None:
-                return Response(
-                    {"detail": "Token has already been used."},
-                    status=HTTP_401_UNAUTHORIZED
-                )
+                # Check if already used
+                if email_token.used_at is not None:
+                    return Response(
+                        {"detail": "Token has already been used."},
+                        status=HTTP_401_UNAUTHORIZED
+                    )
 
-            # Mark as used
-            email_token.used_at = timezone.now()
-            email_token.save(update_fields=['used_at'])
+                # Mark as used
+                email_token.used_at = timezone.now()
+                email_token.save(update_fields=['used_at'])
 
-            # Get or create user
-            user = User.objects.filter(email__iexact=email_token.email).first()
-            if not user:
-                # Create new user from email
-                username = _generate_unique_username(email_token.email.split('@')[0])
-                user = User.objects.create_user(
-                    username=username,
-                    email=email_token.email,
-                )
-                user.set_unusable_password()  # No password for email-based auth
-                user.save()
+                # Get or create user
+                user = User.objects.filter(email__iexact=email_token.email).first()
+                if not user:
+                    # Create new user from email
+                    username = _generate_unique_username(email_token.email.split('@')[0])
+                    user = User.objects.create_user(
+                        username=username,
+                        email=email_token.email,
+                    )
+                    user.set_unusable_password()  # No password for email-based auth
+                    user.save()
 
-                logger.info(f"✨ New user created via email auth: {user.id} ({email_token.email})")
+                    logger.info(f"✨ New user created via email auth: {user.id} ({email_token.email})")
 
-            # Link email token to user (for audit trail)
-            email_token.user = user
-            email_token.save(update_fields=['user'])
+                # Link email token to user (for audit trail)
+                email_token.user = user
+                email_token.save(update_fields=['user'])
 
             # Issue JWT tokens
             token_pair = _issue_tokens_for_user(user)

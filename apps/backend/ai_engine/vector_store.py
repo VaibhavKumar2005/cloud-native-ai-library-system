@@ -62,6 +62,7 @@ AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
 # Try both variable names for backward compatibility
 AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_MODEL = os.environ.get("AZURE_OPENAI_DEPLOYMENT") or os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME") or "gpt-4-turbo"
+USE_MOCK_EMBEDDINGS = os.environ.get("USE_MOCK_EMBEDDINGS", "false").strip().lower() == "true"
 
 # Vector search thresholds
 SIMILARITY_THRESHOLD = 0.7  # Minimum similarity score for context
@@ -78,6 +79,11 @@ def get_embedding_model():
     Returns:
         AzureOpenAIEmbeddings or MockEmbeddings: Initialized embeddings model
     """
+    # Explicit local override for demo/testing stability
+    if USE_MOCK_EMBEDDINGS:
+        logger.info("Using mock embeddings (USE_MOCK_EMBEDDINGS=true)")
+        return MockEmbeddings()
+
     # Try Azure first
     if AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY:
         try:

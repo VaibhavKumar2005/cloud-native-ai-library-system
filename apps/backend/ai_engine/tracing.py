@@ -11,6 +11,11 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -21,6 +26,25 @@ OTEL_EXPORTER_ENDPOINT = os.environ.get('OTEL_EXPORTER_ENDPOINT', '').strip()
 
 _tracer = None
 _initialized = False
+
+
+def estimate_token_count(text: Optional[str], model: str = "gpt-4o-mini") -> int:
+    """Best-effort token estimate for prompt/context observability."""
+    if not text:
+        return 0
+
+    if tiktoken is not None:
+        try:
+            encoding = tiktoken.encoding_for_model(model)
+        except Exception:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        try:
+            return len(encoding.encode(text))
+        except Exception:
+            pass
+
+    # Fallback heuristic for environments without tokenizer support.
+    return max(1, len(text) // 4)
 
 
 def _set_span_attributes(span, attributes: Optional[Dict[str, Any]] = None):

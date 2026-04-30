@@ -380,8 +380,8 @@ def process_abstract_to_vector_db(self, document_id: int):
     Returns:
         dict with indexing status
     """
-    from ai_engine.models import Document, ChunkIndex
-    from langchain_openai import OpenAIEmbeddings
+    from ai_engine.models import Document
+    from ai_engine.vector_store import replace_document_chunks, sanitize_utf8_text
     
     logger.info(f"📚 [Task {self.request.id}] Indexing abstract for document {document_id}")
     
@@ -389,7 +389,7 @@ def process_abstract_to_vector_db(self, document_id: int):
         doc = Document.objects.get(id=document_id)
         
         # Get content from abstract/content field
-        content = doc.content or ''
+        content = sanitize_utf8_text(doc.content or '')
         if not content:
             logger.warning(f"No content to index for document {document_id}")
             doc.status = Document.Status.INDEXED
@@ -397,27 +397,20 @@ def process_abstract_to_vector_db(self, document_id: int):
             doc.save()
             return {'status': 'no_content', 'document_id': document_id}
         
-        # Initialize embeddings (using existing get_embedding_model if available)
-        try:
-            from ai_engine.rag_logic import get_embedding_model
-            embeddings_obj = get_embedding_model()
-        except ImportError:
-            # Fallback to direct OpenAI
-            embeddings_obj = OpenAIEmbeddings(model="text-embedding-3-small")
-        
-        # Create a single chunk for the abstract
-        embedding = embeddings_obj.embed_query(content)
-        
-        # Store as chunk
-        chunk = ChunkIndex.objects.create(
-            document=doc,
-            content=content,
-            chunk_index=0,
-            embedding=embedding,
-            page_number=0,
-            is_qa=False,  # Abstracts aren't Q&A format
-            citation_keys=[],  # No pre-extracted citations
-            user_id=doc.user_id
+        chunk_ids = replace_document_chunks(
+            doc.id,
+            [content],
+            [{
+                'document_id': str(doc.id),
+                'document_title': sanitize_utf8_text(doc.title),
+                'page': 0,
+                'page_number': 0,
+                'chunk_index': 0,
+                'is_qa': False,
+                'citation_keys': [],
+                'user_id': str(doc.user_id or 0),
+                'source': doc.source,
+            }]
         )
         
         # Mark document as processed
@@ -427,12 +420,12 @@ def process_abstract_to_vector_db(self, document_id: int):
         doc.processed_chunks = 1
         doc.save()
         
-        logger.info(f"✅ Successfully indexed abstract for document {document_id} (chunk: {chunk.id})")
+        logger.info(f"✅ Successfully indexed abstract for document {document_id} ({len(chunk_ids)} vector chunk)")
         
         return {
             'status': 'indexed',
             'document_id': document_id,
-            'chunk_id': chunk.id,
+            'chunk_id': chunk_ids[0] if chunk_ids else None,
             'content_length': len(content)
         }
     

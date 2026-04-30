@@ -43,6 +43,15 @@ class MockEmbeddings:
         norm = sum(x**2 for x in embedding) ** 0.5
         return [x / (norm + 1e-8) for x in embedding]
 
+
+def sanitize_utf8_text(value):
+    """Normalize text before sending it to PGVector/psycopg."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    return value.encode("utf-8", "replace").decode("utf-8")
+
 # ============================================================================
 # DATABASE CONFIGURATION
 # ============================================================================
@@ -116,6 +125,34 @@ def get_vector_store():
         connection_string=CONNECTION_STRING,
         embedding_function=get_embedding_model(),
     )
+
+
+def replace_document_chunks(document_id, texts, metadatas, previous_count=0):
+    """
+    Replace a document's indexed chunks in PGVector using stable IDs.
+
+    This keeps ingestion aligned with the retrieval path used by query_academic_rag.
+    """
+    if len(texts) != len(metadatas):
+        raise ValueError("texts and metadatas must have the same length")
+
+    vector_store = get_vector_store()
+    ids = [f"doc:{document_id}:chunk:{index}" for index in range(len(texts))]
+    stale_ids = [
+        f"doc:{document_id}:chunk:{index}"
+        for index in range(max(len(texts), previous_count))
+    ]
+
+    if stale_ids:
+        try:
+            vector_store.delete(ids=stale_ids, collection_only=True)
+        except Exception as exc:
+            logger.warning("Unable to delete existing vectors for document %s: %s", document_id, exc)
+
+    if ids:
+        vector_store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
+
+    return ids
 
 
 def get_text_splitter(chunk_size=1000, chunk_overlap=200):

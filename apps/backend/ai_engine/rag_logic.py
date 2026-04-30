@@ -23,6 +23,8 @@ from ai_engine.vector_store import (
     get_embedding_model,
     get_vector_store,
     get_text_splitter,
+    replace_document_chunks,
+    sanitize_utf8_text,
     build_evidence_payload,
     extract_unique_document_ids,
     CONNECTION_STRING,
@@ -70,6 +72,7 @@ try:
         add_span_attributes,
         record_event,
         get_trace_id,
+        estimate_token_count,
     )
 except ImportError:
     # Fallback no-op implementations
@@ -86,6 +89,8 @@ except ImportError:
         pass
     def get_trace_id():
         return None
+    def estimate_token_count(*args, **kwargs):
+        return 0
 
 # Set up logging for debugging
 logger = logging.getLogger(__name__)
@@ -245,7 +250,7 @@ def ingest_document(doc_id):
     Minimal version: No fancy parsing, just text + embeddings + citations.
     """
     import time as _time
-    from ai_engine.models import ChunkIndex, DocumentMetadata
+    from ai_engine.models import DocumentMetadata
     
     BATCH_SIZE = int(os.environ.get("EMBEDDING_BATCH_SIZE", "32"))
     BATCH_DELAY = float(os.environ.get("EMBEDDING_BATCH_DELAY_SECONDS", "1.5"))
@@ -253,6 +258,7 @@ def ingest_document(doc_id):
     try:
         doc = Document.objects.get(id=doc_id)
         file_path = doc.file.path
+        previous_chunk_count = doc.total_chunks or 0
         logger.info(f"📄 Ingesting: {doc.title}")
         
         # Mark as processing
@@ -296,41 +302,40 @@ def ingest_document(doc_id):
         logger.info(f"✂️ Split into {len(chunks)} chunks")
 
         # ====================================================================
-        # STEP 4: Embed and store chunks
+        # STEP 4: Store chunks in PGVector (same store used at query time)
         # ====================================================================
-        embedding_model = get_embedding_model()
-        
+        texts = []
+        metadatas = []
         for i, chunk in enumerate(chunks):
-            # Embed this chunk
-            try:
-                embedding = embedding_model.embed_query(chunk.page_content)
-            except Exception as e:
-                logger.warning(f"Embedding failed for chunk {i}: {e}")
+            clean_content = sanitize_utf8_text(chunk.page_content)
+            if not clean_content.strip():
                 continue
-            
-            # Find citations in this chunk
-            citation_keys = find_citations_in_chunk(chunk.page_content, citations)
-            
-            # Detect if this is a Q&A pair
-            is_qa = is_qa_chunk(chunk.page_content)
-            
-            # Store in ChunkIndex
-            ChunkIndex.objects.create(
-                document=doc,
-                content=chunk.page_content,
-                embedding=embedding,  # pgvector will handle it
-                page_number=chunk.metadata.get('page', 0),
-                citation_keys=citation_keys,
-                is_qa=is_qa,
-                user_id=doc.user.id if doc.user else 0
+
+            citation_keys = find_citations_in_chunk(clean_content, citations)
+            is_qa = is_qa_chunk(clean_content)
+
+            texts.append(clean_content)
+            metadatas.append(
+                {
+                    "document_id": str(doc.id),
+                    "document_title": sanitize_utf8_text(doc.title),
+                    "page": chunk.metadata.get('page', 0),
+                    "page_number": chunk.metadata.get('page', 0),
+                    "chunk_index": i,
+                    "citation_keys": citation_keys,
+                    "is_qa": is_qa,
+                    "user_id": str(doc.user.id if doc.user else 0),
+                    "source": doc.source,
+                }
             )
-            
-            # Progress
+
             progress = int((i + 1) / len(chunks) * 100)
             if i % 10 == 0:
                 doc.progress_percent = progress
                 doc.processed_chunks = i + 1
                 doc.save(update_fields=['progress_percent', 'processed_chunks'])
+
+        replace_document_chunks(doc.id, texts, metadatas, previous_count=previous_chunk_count)
 
         # ====================================================================
         # STEP 5: Mark as done
@@ -338,12 +343,12 @@ def ingest_document(doc_id):
         doc.processed = True
         doc.status = Document.Status.INDEXED
         doc.progress_percent = 100
-        doc.processed_chunks = len(chunks)
-        doc.total_chunks = len(chunks)
+        doc.processed_chunks = len(texts)
+        doc.total_chunks = len(texts)
         doc.save()
         
-        logger.info(f"✅ Indexed {len(chunks)} chunks for {doc.title}")
-        return {"status": "success", "chunks": len(chunks)}
+        logger.info(f"✅ Indexed {len(texts)} chunks for {doc.title}")
+        return {"status": "success", "chunks": len(texts)}
 
     except Exception as e:
         logger.error(f"Ingestion failed: {str(e)}")
@@ -698,6 +703,24 @@ def query_academic_rag(query: str) -> dict:
             if relevance_scores
             else min(0.85, 0.45 + (len(chunks) * 0.1))
         )
+        context_token_estimate = estimate_token_count(context, AZURE_OPENAI_MODEL)
+        query_token_estimate = estimate_token_count(query, AZURE_OPENAI_MODEL)
+        add_span_attributes(
+            {
+                "rag.context.character_count": len(context),
+                "rag.context.token_estimate": context_token_estimate,
+                "rag.query.token_estimate": query_token_estimate,
+                "rag.context.window_utilization_estimate": context_token_estimate + query_token_estimate,
+            }
+        )
+        record_event(
+            "rag.context.prepared",
+            {
+                "rag.context.character_count": len(context),
+                "rag.context.token_estimate": context_token_estimate,
+                "rag.query.token_estimate": query_token_estimate,
+            },
+        )
         
         with tracer.start_as_current_span("generate_answer"):
             answer = _generate_answer_from_context(query=query, context=context)
@@ -768,6 +791,14 @@ Context:
 Question:
 {query}
 """
+        prompt_token_estimate = estimate_token_count(prompt, AZURE_OPENAI_MODEL)
+        add_span_attributes(
+            {
+                "rag.prompt.character_count": len(prompt),
+                "rag.prompt.token_estimate": prompt_token_estimate,
+                "rag.response.max_tokens": 500,
+            }
+        )
 
         try:
             with tracer.start_as_current_span("azure_openai_call"):
@@ -787,12 +818,26 @@ Question:
                     max_tokens=500,
                 )
             span.set_attribute("mode", "azure")
-            return response.choices[0].message.content.strip()
+            answer_text = response.choices[0].message.content.strip()
+            add_span_attributes(
+                {
+                    "rag.response.character_count": len(answer_text),
+                    "rag.response.token_estimate": estimate_token_count(answer_text, AZURE_OPENAI_MODEL),
+                }
+            )
+            return answer_text
         except Exception as e:
             logger.warning(f"Azure OpenAI call failed: {e}, using mock response")
             span.set_attribute("mode", "mock_fallback")
             span.set_attribute("error", str(e))
-            return _mock_answer_from_context(query, context)
+            answer_text = _mock_answer_from_context(query, context)
+            add_span_attributes(
+                {
+                    "rag.response.character_count": len(answer_text),
+                    "rag.response.token_estimate": estimate_token_count(answer_text, AZURE_OPENAI_MODEL),
+                }
+            )
+            return answer_text
 
 
 def _mock_answer_from_context(query: str, context: str) -> str:

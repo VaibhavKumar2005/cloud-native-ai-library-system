@@ -6,6 +6,7 @@ import Monitoring from './Monitoring';
 import Analytics from './Analytics';
 import GitHubHealthChecker from './GitHubHealthChecker';
 import Research from './pages/Research';
+import LoginPage from './AuthPage';
 import { clearSession, storeSession } from './lib/auth';
 
 // ── Auth Guard: In DEMO_MODE, skip all auth checks ──────────
@@ -81,7 +82,7 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Research onLogout={handleLogout} />} />
+        <Route path="/" element={<LoginPage />} />
         <Route path="/tools/github-health-checker" element={<GitHubHealthChecker />} />
         <Route path="/login" element={<MagicLinkLogin />} />
 

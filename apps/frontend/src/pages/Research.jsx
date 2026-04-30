@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import { checkBackendHealth, queryAcademicRAG, uploadDocument } from '../api/research';
+import { checkBackendHealth, runAgenticQuery, searchAcademicPapers, uploadDocument } from '../api/research';
 import AnswerPanel from '../components/AnswerPanel';
 import '../styles/Research.css';
 import '../styles/Components.css';
@@ -19,8 +19,10 @@ import '../styles/Components.css';
 const demoPrompts = [
   'What is RAG?',
   'How does RAG improve accuracy?',
-  'Explain quantum computing',
+  'Why does VeriRAG reject some questions?',
 ];
+
+const HISTORY_KEY = 'verirag_agentic_history_v1';
 
 export default function Research() {
   const [query, setQuery] = useState('');
@@ -29,6 +31,12 @@ export default function Research() {
   const [backendHealth, setBackendHealth] = useState({ state: 'checking', label: 'Checking backend' });
   const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
   const [history, setHistory] = useState([]);
+  const [paperCandidates, setPaperCandidates] = useState([]);
+  const [selectedPapers, setSelectedPapers] = useState([]);
+  const [pendingQuery, setPendingQuery] = useState('');
+  const [paperSearchQuery, setPaperSearchQuery] = useState('');
+  const [paperSearchResults, setPaperSearchResults] = useState([]);
+  const [paperSearchLoading, setPaperSearchLoading] = useState(false);
 
   const totalQueries = history.length;
   const groundedCount = history.filter((item) => item.status === 'answer').length;
@@ -59,20 +67,90 @@ export default function Research() {
     };
   }, []);
 
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      if (Array.isArray(saved)) {
+        setHistory(saved.slice(0, 12));
+      }
+    } catch {
+      setHistory([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 12)));
+  }, [history]);
+
+  const addHistoryItem = useCallback((entry, limit = 12) => {
+    setHistory((items) => [entry, ...items].slice(0, limit));
+  }, []);
+
+  const removeHistoryItem = useCallback((indexToRemove) => {
+    setHistory((items) => items.filter((_, index) => index !== indexToRemove));
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    setHistory([]);
+  }, []);
+
+  const togglePaperSelection = useCallback((paper, checked) => {
+    setSelectedPapers((items) => {
+      const alreadySelected = items.some((item) => item.id === paper.id);
+      if (checked) {
+        return alreadySelected ? items : [...items, paper];
+      }
+      return items.filter((item) => item.id !== paper.id);
+    });
+  }, []);
+
+  const handlePaperSearch = useCallback(async () => {
+    const cleanSearch = paperSearchQuery.trim();
+    if (!cleanSearch) return;
+
+    setPaperSearchLoading(true);
+    try {
+      const papers = await searchAcademicPapers(cleanSearch, 6);
+      setPaperSearchResults(papers);
+    } catch (error) {
+      setAnswer({
+        status: 'rejected',
+        message: error.message || 'Paper search failed.',
+      });
+    } finally {
+      setPaperSearchLoading(false);
+    }
+  }, [paperSearchQuery]);
+
   const handleAsk = useCallback(async (nextQuery = query) => {
     const cleanQuery = nextQuery.trim();
     if (!cleanQuery) return;
 
     setQuery(cleanQuery);
     setLoading(true);
+    setPaperCandidates([]);
 
     try {
-      const response = await queryAcademicRAG(cleanQuery);
-      setAnswer(response);
-      setHistory((items) => [
-        { query: cleanQuery, status: response.status, time: new Date().toLocaleTimeString() },
-        ...items,
-      ].slice(0, 4));
+      const response = await runAgenticQuery(
+        cleanQuery,
+        selectedPapers,
+        selectedPapers[0]?.source || 'semantic-scholar'
+      );
+      if (response.status === 'needs_selection') {
+        setPendingQuery(cleanQuery);
+        setPaperCandidates(response.candidates || []);
+        setAnswer({
+          status: 'selection_required',
+          message: response.message || 'Select papers to ground the answer.',
+        });
+      } else {
+        setAnswer(response.result || response);
+      }
+      addHistoryItem({
+        query: cleanQuery,
+        status: response.status || response?.result?.status || 'answered',
+        time: new Date().toLocaleTimeString(),
+      });
     } catch (error) {
       setAnswer({
         status: 'rejected',
@@ -85,7 +163,34 @@ export default function Research() {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [query, selectedPapers]);
+
+  const handleGroundWithSelected = useCallback(async () => {
+    if (!pendingQuery || selectedPapers.length === 0) return;
+    setLoading(true);
+    try {
+      const response = await runAgenticQuery(
+        pendingQuery,
+        selectedPapers,
+        selectedPapers[0]?.source || 'semantic-scholar'
+      );
+      setAnswer(response.result || response);
+      setPaperCandidates([]);
+      setPendingQuery('');
+      addHistoryItem({
+        query: `${pendingQuery} (grounded with selected papers)`,
+        status: response.status || response?.result?.status || 'answered',
+        time: new Date().toLocaleTimeString(),
+      });
+    } catch (error) {
+      setAnswer({
+        status: 'rejected',
+        message: error.message || 'Failed to ground with selected papers.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [pendingQuery, selectedPapers]);
 
   const handleUpload = useCallback(async (event) => {
     const file = event.target.files?.[0];
@@ -99,10 +204,14 @@ export default function Research() {
         status: 'queued',
         message: `${document.title || file.name} queued for indexing`,
       });
-      setHistory((items) => [
-        { query: `Uploaded ${file.name}`, status: document.status || 'queued', time: new Date().toLocaleTimeString() },
-        ...items,
-      ].slice(0, 4));
+      addHistoryItem(
+        {
+          query: `Uploaded ${file.name}`,
+          status: document.status || 'queued',
+          time: new Date().toLocaleTimeString(),
+        },
+        12
+      );
     } catch (error) {
       setUploadState({
         status: 'error',
@@ -111,11 +220,17 @@ export default function Research() {
     } finally {
       event.target.value = '';
     }
-  }, []);
+  }, [addHistoryItem]);
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter') {
       handleAsk();
+    }
+  };
+
+  const handlePaperSearchKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      handlePaperSearch();
     }
   };
 
@@ -221,6 +336,48 @@ export default function Research() {
                 <p>Index PDFs into the retrieval store.</p>
               </div>
             </div>
+            <div className="sub-panel">
+              <p className="sub-panel-label">Search research papers</p>
+              <div className="query-box compact-query-box">
+                <Search size={18} />
+                <input
+                  value={paperSearchQuery}
+                  onChange={(event) => setPaperSearchQuery(event.target.value)}
+                  onKeyDown={handlePaperSearchKeyDown}
+                  placeholder="Find papers about RAG, agents, evals..."
+                  aria-label="Search research papers"
+                />
+                <button onClick={handlePaperSearch} disabled={paperSearchLoading || !paperSearchQuery.trim()}>
+                  {paperSearchLoading ? 'Searching...' : 'Search'}
+                </button>
+              </div>
+              {selectedPapers.length > 0 && (
+                <div className="selected-papers-summary">
+                  <strong>{selectedPapers.length} selected</strong>
+                  <button type="button" onClick={() => setSelectedPapers([])}>Clear</button>
+                </div>
+              )}
+              {paperSearchResults.length > 0 && (
+                <div className="paper-search-results">
+                  {paperSearchResults.map((paper) => {
+                    const isSelected = selectedPapers.some((item) => item.id === paper.id);
+                    return (
+                      <label key={paper.id} className={`paper-card ${isSelected ? 'selected' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(event) => togglePaperSelection(paper, event.target.checked)}
+                        />
+                        <span>
+                          <strong>{paper.title}</strong>
+                          <small>{paper.year} · {paper.source}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <label className={`upload-placeholder upload-dropzone ${uploadState.status}`}>
               {uploadState.status === 'uploading' ? <Loader2 size={34} className="spin" /> : <FileUp size={34} />}
               <strong>{uploadState.status === 'idle' ? 'Upload research PDF' : uploadState.message}</strong>
@@ -253,6 +410,7 @@ export default function Research() {
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask VeriRAG Librarian..."
+                aria-label="Research question input"
               />
               <button onClick={() => handleAsk()} disabled={loading || !query.trim()}>
                 {loading ? 'Querying...' : 'Query AI'}
@@ -260,6 +418,34 @@ export default function Research() {
             </div>
 
             <div className="answer-region">
+              {paperCandidates.length > 0 && (
+                <div className="paper-picker" aria-live="polite">
+                  <h4>Found papers for grounding. Choose what to use:</h4>
+                  {paperCandidates.map((paper) => {
+                    const isSelected = selectedPapers.some((item) => item.id === paper.id);
+                    return (
+                      <label key={paper.id} className="paper-option">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(event) => togglePaperSelection(paper, event.target.checked)}
+                        />
+                        <span>
+                          <strong>{paper.title}</strong>
+                          <small>{paper.year} · {paper.source}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                  <button
+                    className="ground-button"
+                    onClick={handleGroundWithSelected}
+                    disabled={loading || selectedPapers.length === 0}
+                  >
+                    {loading ? 'Grounding...' : `Ground answer with ${selectedPapers.length} selected`}
+                  </button>
+                </div>
+              )}
               {answer ? (
                 <>
                   <AnswerPanel answer={answer} />
@@ -299,12 +485,18 @@ export default function Research() {
             </div>
             {history.length > 0 && (
               <div className="query-history">
-                <p>Recent queries</p>
+                <div className="query-history-header">
+                  <p>Recent queries</p>
+                  <button type="button" onClick={clearHistory}>Clear all</button>
+                </div>
                 {history.map((item, index) => (
-                  <div key={`${item.query}-${index}`}>
+                  <div key={`${item.query}-${index}`} className="query-history-item">
                     <strong>{item.status}</strong>
                     <span>{item.query}</span>
                     <small>{item.time}</small>
+                    <button type="button" onClick={() => removeHistoryItem(index)} aria-label={`Delete history item ${item.query}`}>
+                      Delete
+                    </button>
                   </div>
                 ))}
               </div>

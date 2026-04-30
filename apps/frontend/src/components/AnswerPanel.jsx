@@ -1,6 +1,19 @@
 import React from 'react';
 
 export default function AnswerPanel({ answer }) {
+  if (answer.status === 'selection_required') {
+    return (
+      <div className="answer-panel pending">
+        <div className="answer-header">
+          <h4>Select Papers to Continue</h4>
+        </div>
+        <p className="answer-text">
+          {answer.message || 'Choose one or more papers below to ground the response.'}
+        </p>
+      </div>
+    );
+  }
+
   if (!answer.answer) {
     return (
       <div className="answer-panel error">

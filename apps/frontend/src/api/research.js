@@ -7,6 +7,15 @@ const trimTrailingSlash = (value) => value.replace(/\/+$/, '');
 
 const API_ROOT = trimTrailingSlash(import.meta.env.VITE_API_URL || '');
 const API_BASE = `${API_ROOT}/api`;
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+
+function authHeaders() {
+  if (DEMO_MODE) {
+    return {};
+  }
+  const token = localStorage.getItem('access_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function parseJsonResponse(response, fallbackMessage) {
   let data = null;
@@ -46,10 +55,11 @@ export async function searchAcademicPapers(query, limit = 10) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...authHeaders(),
         },
         body: JSON.stringify({
           query: query,
-          source: 'semantic_scholar',
+          source: 'semantic-scholar',
           limit: limit
         })
       }
@@ -74,6 +84,7 @@ export async function queryAcademicRAG(query, sessionPaperIds = []) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...authHeaders(),
         },
         body: JSON.stringify({
           query,
@@ -100,6 +111,7 @@ export async function ingestAcademicPaper(paperData) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...authHeaders(),
         },
         body: JSON.stringify(paperData)
       }
@@ -110,6 +122,24 @@ export async function ingestAcademicPaper(paperData) {
     console.error('Ingest error:', error);
     throw error;
   }
+}
+
+export async function runAgenticQuery(query, selectedPapers = [], source = 'arxiv') {
+  const response = await fetch(`${API_BASE}/papers/agentic-query/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(),
+    },
+    body: JSON.stringify({
+      query,
+      source,
+      selected_paper_ids: selectedPapers.map((paper) => paper.id),
+      selected_papers: selectedPapers,
+    }),
+  });
+
+  return parseJsonResponse(response, 'Agentic query failed');
 }
 
 /**
@@ -171,6 +201,7 @@ export async function uploadDocument(file) {
       `${API_BASE}/documents/`,
       {
         method: 'POST',
+        headers: authHeaders(),
         body: formData
       }
     );

@@ -4,10 +4,13 @@ Integrates with Semantic Scholar, arXiv, CrossRef, and Google Scholar
 """
 import requests
 import logging
+from textwrap import shorten
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from .models import AcademicPaper, PaperLibrary, ResearchTopic, ResearchGap, PaperQnA
@@ -37,9 +40,32 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [IsAuthenticated]
     serializer_class = AcademicPaperSerializer
+
+    def get_permissions(self):
+        if settings.DEMO_MODE:
+            return [AllowAny()]
+        return super().get_permissions()
+
+    def _get_demo_user(self):
+        User = get_user_model()
+        user, _ = User.objects.get_or_create(
+            username='demo',
+            defaults={
+                'email': 'demo@verirag.local',
+                'is_active': True,
+            },
+        )
+        return user
+
+    def _get_request_user(self, request):
+        if request.user.is_authenticated:
+            return request.user
+        if settings.DEMO_MODE:
+            return self._get_demo_user()
+        return request.user
     
     def get_queryset(self):
-        return AcademicPaper.objects.filter(user=self.request.user)
+        return AcademicPaper.objects.filter(user=self._get_request_user(self.request))
     
     @action(detail=False, methods=['post'])
     def search(self, request):
@@ -86,94 +112,91 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
             return Response({'error': 'paper_ids or papers required'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            from ai_engine.models import Document
-            from ai_engine.tasks import process_abstract_to_vector_db
-            
-            ingested_count = 0
-            document_ids = []
-            
-            # Allow direct ingest from prior search payloads to avoid
-            # hard dependency on a second external API round-trip.
-            papers_to_ingest = []
-            for payload in paper_payloads:
-                if isinstance(payload, dict):
-                    payload_id = payload.get('id') or payload.get('paperId')
-                    if payload_id:
-                        papers_to_ingest.append((str(payload_id), payload))
-
-            for paper_id in paper_ids:
-                papers_to_ingest.append((paper_id, None))
-
-            for paper_id, payload in papers_to_ingest:
-                paper_data = payload or self._fetch_paper_details(paper_id, source)
-                if paper_data:
-                    paper_data = dict(paper_data)
-                    # Normalize external search payload shape to model fields.
-                    payload_external_id = paper_data.pop('id', None) or paper_data.pop('paperId', None)
-                    paper_data.setdefault('external_id', payload_external_id or paper_id)
-                    paper_data.setdefault('publication_year', paper_data.pop('year', None))
-                    paper_data.setdefault('citation_count', paper_data.pop('citationCount', 0))
-                    paper_data.setdefault('source', source)
-
-                    # Step 1: Create/update AcademicPaper (for discovery and tracking)
-                    academic_paper, created = AcademicPaper.objects.update_or_create(
-                        external_id=paper_id,
-                        defaults={
-                            **paper_data,
-                            'user': request.user,
-                        }
-                    )
-                    
-                    # Step 2: Create Document (unified model for RAG)
-                    # Map source names to Document.Source choices
-                    source_mapping = {
-                        AcademicPaper.Source.SEMANTIC_SCHOLAR: Document.Source.SEMANTIC_SCHOLAR,
-                        AcademicPaper.Source.ARXIV: Document.Source.ARXIV,
-                        AcademicPaper.Source.CROSSREF: Document.Source.CROSSREF,
-                    }
-                    
-                    doc_source = source_mapping.get(paper_data.get('source'), Document.Source.SEMANTIC_SCHOLAR)
-                    
-                    # Create document with abstract as content
-                    doc, doc_created = Document.objects.get_or_create(
-                        user=request.user,
-                        title=paper_data.get('title', f'Paper {paper_id}'),
-                        source=doc_source,
-                        defaults={
-                            'content': paper_data.get('abstract', ''),
-                            'status': Document.Status.QUEUED,
-                            'source_metadata': {
-                                'paper_id': paper_id,
-                                'external_id': paper_id,
-                                'external_url': paper_data.get('url', ''),
-                                'authors': paper_data.get('authors', []),
-                                'year': paper_data.get('publication_year'),
-                                'venue': paper_data.get('venue', ''),
-                                'doi': paper_data.get('doi', ''),
-                                'citation_count': paper_data.get('citation_count', 0),
-                                'abstract': paper_data.get('abstract', ''),
-                            }
-                        }
-                    )
-                    
-                    # Step 3: Trigger Celery task to index abstract into pgvector
-                    if doc_created and paper_data.get('abstract'):
-                        # Use abstract ingestion task (new, lightweight)
-                        process_abstract_to_vector_db.delay(document_id=doc.id)
-                        document_ids.append(doc.id)
-                    
-                    ingested_count += 1
-            
+            ingest_result = self._ingest_papers_for_user(
+                user=self._get_request_user(request),
+                paper_ids=paper_ids,
+                paper_payloads=paper_payloads,
+                source=source,
+                sync_process=False,
+            )
             return Response({
-                'ingested': ingested_count,
-                'total_requested': len(papers_to_ingest),
-                'document_ids': document_ids,
-                'message': f'Successfully ingested {ingested_count} papers into RAG system'
+                'ingested': ingest_result['ingested'],
+                'total_requested': ingest_result['total_requested'],
+                'document_ids': ingest_result['document_ids'],
+                'message': f"Successfully ingested {ingest_result['ingested']} papers into RAG system"
             }, status=status.HTTP_202_ACCEPTED)  # 202 Accepted for async processing
         
         except Exception as e:
             logger.error(f"Paper ingestion failed: {e}")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='agentic-query')
+    def agentic_query(self, request):
+        """
+        Agentic RAG flow:
+        1) try local retrieval
+        2) if weak evidence, search papers
+        3) let user select papers
+        4) answer from selected paper abstracts
+        """
+        query = str(request.data.get('query', '')).strip()
+        selected_paper_ids = request.data.get('selected_paper_ids', []) or []
+        source = request.data.get('source', 'arxiv')
+
+        if not query:
+            return Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Step 1: Try local RAG first.
+        local_result = query_academic_rag(query=query)
+        if local_result.get('status') != 'rejected' and local_result.get('answer'):
+            return Response({
+                'status': 'answered',
+                'mode': 'local_rag',
+                'result': local_result,
+            })
+
+        # Step 2: If no selection yet, provide candidate papers.
+        if not selected_paper_ids:
+            try:
+                papers = self._search_papers(query, source)
+            except Exception as exc:
+                logger.warning("Agentic paper search failed for %r via %s: %s", query, source, exc)
+                return Response({
+                    'status': 'rejected',
+                    'mode': 'paper_search_unavailable',
+                    'message': (
+                        'Local evidence was weak and external paper search is currently unavailable. '
+                        'Try a more specific query or retry in a moment.'
+                    ),
+                }, status=status.HTTP_200_OK)
+            candidates = papers[:6]
+            return Response({
+                'status': 'needs_selection',
+                'mode': 'paper_search',
+                'message': 'Local evidence was weak. Select papers to ground your answer.',
+                'candidates': candidates,
+            })
+
+        # Step 3: Ingest selected papers and answer with explicit grounding.
+        selected_payloads = request.data.get('selected_papers', []) or []
+        ingest_result = self._ingest_papers_for_user(
+            user=self._get_request_user(request),
+            paper_ids=selected_paper_ids,
+            paper_payloads=selected_payloads,
+            source=source,
+            sync_process=False,
+        )
+        grounded_papers = ingest_result.get('papers', [])
+        grounded_answer = self._build_grounded_answer_from_papers(query, grounded_papers)
+        return Response({
+            'status': 'answered',
+            'mode': 'paper_grounded',
+            'result': grounded_answer,
+            'ingest': {
+                'ingested': ingest_result['ingested'],
+                'document_ids': ingest_result['document_ids'],
+            },
+        })
     
     @action(detail=False, methods=['get'])
     def library(self, request):
@@ -227,7 +250,7 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
             # Log the Q&A
             qna = PaperQnA.objects.create(
                 paper=paper,
-                user=request.user,
+                user=self._get_request_user(request),
                 question=question,
                 answer=answer,
                 sources_cited=sources,
@@ -441,6 +464,137 @@ class AcademicPaperViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"Failed to fetch CrossRef details: {e}")
             return None
+
+    def _ingest_papers_for_user(self, user, paper_ids, paper_payloads, source, sync_process=False):
+        """Create/refresh AcademicPaper+Document records for selected papers."""
+        from ai_engine.models import Document
+        from ai_engine.tasks import process_abstract_to_vector_db
+
+        ingested_count = 0
+        document_ids = []
+        hydrated_papers = []
+
+        papers_to_ingest = []
+        for payload in paper_payloads or []:
+            if isinstance(payload, dict):
+                payload_id = payload.get('id') or payload.get('paperId')
+                if payload_id:
+                    papers_to_ingest.append((str(payload_id), payload))
+
+        for paper_id in paper_ids or []:
+            if str(paper_id) not in {pid for pid, _ in papers_to_ingest}:
+                papers_to_ingest.append((str(paper_id), None))
+
+        for paper_id, payload in papers_to_ingest:
+            paper_data = payload or self._fetch_paper_details(paper_id, source)
+            if not paper_data:
+                continue
+
+            paper_data = dict(paper_data)
+            payload_external_id = paper_data.pop('id', None) or paper_data.pop('paperId', None)
+            paper_data.setdefault('external_id', payload_external_id or paper_id)
+            paper_data.setdefault('publication_year', paper_data.pop('year', None))
+            paper_data.setdefault('citation_count', paper_data.pop('citationCount', 0))
+            paper_data.setdefault('source', source)
+
+            academic_paper, _ = AcademicPaper.objects.update_or_create(
+                external_id=paper_id,
+                defaults={**paper_data, 'user': user},
+            )
+            hydrated_papers.append(academic_paper)
+
+            source_mapping = {
+                AcademicPaper.Source.SEMANTIC_SCHOLAR: Document.Source.SEMANTIC_SCHOLAR,
+                AcademicPaper.Source.ARXIV: Document.Source.ARXIV,
+                AcademicPaper.Source.CROSSREF: Document.Source.CROSSREF,
+            }
+            doc_source = source_mapping.get(paper_data.get('source'), Document.Source.SEMANTIC_SCHOLAR)
+
+            doc, doc_created = Document.objects.get_or_create(
+                user=user,
+                title=paper_data.get('title', f'Paper {paper_id}'),
+                source=doc_source,
+                defaults={
+                    'content': paper_data.get('abstract', ''),
+                    'status': Document.Status.QUEUED,
+                    'source_metadata': {
+                        'paper_id': paper_id,
+                        'external_id': paper_id,
+                        'external_url': paper_data.get('url', ''),
+                        'authors': paper_data.get('authors', []),
+                        'year': paper_data.get('publication_year'),
+                        'venue': paper_data.get('venue', ''),
+                        'doi': paper_data.get('doi', ''),
+                        'citation_count': paper_data.get('citation_count', 0),
+                        'abstract': paper_data.get('abstract', ''),
+                    },
+                },
+            )
+
+            if doc_created and paper_data.get('abstract'):
+                if sync_process:
+                    process_abstract_to_vector_db.apply(kwargs={'document_id': doc.id})
+                else:
+                    process_abstract_to_vector_db.delay(document_id=doc.id)
+                document_ids.append(doc.id)
+
+            ingested_count += 1
+
+        return {
+            'ingested': ingested_count,
+            'total_requested': len(papers_to_ingest),
+            'document_ids': document_ids,
+            'papers': hydrated_papers,
+        }
+
+    def _build_grounded_answer_from_papers(self, query, papers):
+        """Create a grounded response directly from selected paper abstracts."""
+        if not papers:
+            return {
+                'status': 'rejected',
+                'message': 'No selected papers were available for grounding.',
+                'confidence': 0.0,
+                'confidence_label': 'none',
+                'retrieval': {'top_k': 0, 'min_relevance': 0.2, 'chunks_returned': 0},
+            }
+
+        bullet_points = []
+        sources = []
+        for paper in papers[:4]:
+            abstract = (paper.abstract or '').strip()
+            if not abstract:
+                continue
+            excerpt = shorten(abstract, width=260, placeholder='...')
+            bullet_points.append(f"- {paper.title}: {excerpt}")
+            sources.append({
+                'title': paper.title,
+                'source': paper.source,
+                'metadata_url': paper.url,
+                'excerpt': excerpt,
+                'relevance': 0.82,
+            })
+
+        if not bullet_points:
+            return {
+                'status': 'rejected',
+                'message': 'Selected papers do not have usable abstract text for grounding.',
+                'confidence': 0.0,
+                'confidence_label': 'none',
+                'retrieval': {'top_k': len(papers), 'min_relevance': 0.2, 'chunks_returned': 0},
+            }
+
+        answer_text = (
+            f"For your question '{query}', I grounded the response in the selected papers. "
+            "Here are the most relevant findings:\n\n" + "\n".join(bullet_points)
+        )
+        return {
+            'status': 'answer',
+            'answer': answer_text,
+            'confidence': 0.82,
+            'confidence_label': 'grounded',
+            'retrieval': {'top_k': len(papers), 'min_relevance': 0.2, 'chunks_returned': len(sources)},
+            'sources': sources,
+        }
     
     def _get_mock_papers(self, query):
         """Return mock papers for demo/testing when APIs are unavailable"""

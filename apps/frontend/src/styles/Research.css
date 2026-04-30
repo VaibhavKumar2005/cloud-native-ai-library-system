@@ -7,6 +7,14 @@
   color: #f8fafc;
 }
 
+:root {
+  --vr-surface: rgba(15, 23, 42, 0.44);
+  --vr-surface-strong: rgba(2, 6, 23, 0.62);
+  --vr-border: rgba(148, 163, 184, 0.16);
+  --vr-cyan: #22d3ee;
+  --vr-emerald: #34d399;
+}
+
 .verirag-nav {
   position: sticky;
   top: 0;
@@ -187,10 +195,53 @@
 .library-panel,
 .chat-panel,
 .health-panel {
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid var(--vr-border);
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.46);
+  background: var(--vr-surface);
+  backdrop-filter: blur(10px) saturate(125%);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.30);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 220ms ease, background 220ms ease;
+}
+
+.workflow-card::before,
+.metric-card::before,
+.library-panel::before,
+.chat-panel::before,
+.health-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(
+      320px circle at var(--mx, 50%) var(--my, 50%),
+      rgba(34, 211, 238, 0.16),
+      rgba(34, 211, 238, 0.05) 40%,
+      transparent 72%
+    );
+  transition: opacity 180ms ease;
+}
+
+.workflow-card:hover,
+.metric-card:hover,
+.library-panel:hover,
+.chat-panel:hover,
+.health-panel:hover {
+  transform: translateY(-2px);
+  border-color: rgba(34, 211, 238, 0.22);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.36);
+}
+
+.workflow-card:hover::before,
+.metric-card:hover::before,
+.library-panel:hover::before,
+.chat-panel:hover::before,
+.health-panel:hover::before {
+  opacity: 1;
 }
 
 .workflow-card {
@@ -299,7 +350,7 @@
   padding: 24px;
   border: 1px dashed rgba(148, 163, 184, 0.22);
   border-radius: 8px;
-  background: rgba(2, 6, 23, 0.30);
+  background: rgba(2, 6, 23, 0.38);
 }
 
 .upload-placeholder {
@@ -360,8 +411,15 @@
   text-align: left;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.66);
+  background: rgba(15, 23, 42, 0.72);
   cursor: pointer;
+  transition: border-color 160ms ease, transform 160ms ease, background 180ms ease;
+}
+
+.next-actions button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(34, 211, 238, 0.24);
+  background: rgba(8, 47, 73, 0.30);
 }
 
 .query-box {
@@ -370,7 +428,14 @@
   padding: 14px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 8px;
-  background: rgba(2, 6, 23, 0.58);
+  background: var(--vr-surface-strong);
+  backdrop-filter: blur(10px) saturate(120%);
+  transition: border-color 160ms ease, box-shadow 180ms ease;
+}
+
+.query-box:focus-within {
+  border-color: rgba(34, 211, 238, 0.36);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.14);
 }
 
 .query-box input {
@@ -390,6 +455,12 @@
   border-radius: 8px;
   font-weight: 900;
   cursor: pointer;
+  transition: transform 160ms ease, filter 180ms ease;
+}
+
+.query-box button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(108%);
 }
 
 .query-box button:disabled {
@@ -434,6 +505,13 @@
   text-transform: capitalize;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.7);
+  outline-offset: 2px;
+}
+
 @media (max-width: 1100px) {
   .workflow-grid,
   .console-grid {
@@ -443,6 +521,15 @@
   .chat-panel {
     grid-column: 1 / -1;
     order: -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }
 

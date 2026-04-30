@@ -30,6 +30,11 @@ export default function Research() {
   const [uploadState, setUploadState] = useState({ status: 'idle', message: '' });
   const [history, setHistory] = useState([]);
 
+  const totalQueries = history.length;
+  const groundedCount = history.filter((item) => item.status === 'answer').length;
+  const rejectedCount = history.filter((item) => item.status === 'rejected').length;
+  const groundedRate = totalQueries > 0 ? Math.round((groundedCount / totalQueries) * 100) : 0;
+
   useEffect(() => {
     let active = true;
 
@@ -191,19 +196,19 @@ export default function Research() {
 
         <div className="metrics-row">
           <div className="metric-card">
-            <span>Documents</span>
-            <strong>Indexing</strong>
-            <small>PDF upload, chunk, embed, store</small>
+            <span>Queries</span>
+            <strong>{totalQueries}</strong>
+            <small>Live workspace interactions</small>
           </div>
           <div className="metric-card">
-            <span>Verification</span>
-            <strong>Strict</strong>
-            <small>No evidence means rejection</small>
+            <span>Grounded Rate</span>
+            <strong>{groundedRate}%</strong>
+            <small>Answers returned with evidence</small>
           </div>
           <div className="metric-card">
-            <span>Auth</span>
-            <strong>Demo</strong>
-            <small>Open workspace with isolated demo user</small>
+            <span>Rejections</span>
+            <strong>{rejectedCount}</strong>
+            <small>Insufficient-evidence guardrails</small>
           </div>
         </div>
 
@@ -256,7 +261,19 @@ export default function Research() {
 
             <div className="answer-region">
               {answer ? (
-                <AnswerPanel answer={answer} />
+                <>
+                  <AnswerPanel answer={answer} />
+                  {answer.status === 'rejected' && (
+                    <div className="empty-evidence" style={{ marginTop: '12px' }}>
+                      <AlertTriangle size={22} />
+                      <h3>Try a More Targeted Query</h3>
+                      <p>
+                        This rejection is expected when evidence is weak. Search and ingest a relevant paper,
+                        then ask again with specific terms (model, dataset, institution, year).
+                      </p>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="empty-evidence">
                   <ShieldCheck size={36} />

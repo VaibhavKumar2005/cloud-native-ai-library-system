@@ -116,6 +116,7 @@ jobs:
           [[ -n "${{ vars.AZURE_RESOURCE_GROUP }}" ]] || { echo "Missing repo variable: AZURE_RESOURCE_GROUP"; exit 1; }
           [[ -n "${{ vars.BACKEND_APP_NAME }}" ]] || { echo "Missing repo variable: BACKEND_APP_NAME"; exit 1; }
           [[ -n "${{ vars.FRONTEND_APP_NAME }}" ]] || { echo "Missing repo variable: FRONTEND_APP_NAME"; exit 1; }
+          [[ -n "${{ secrets.DJANGO_SECRET_KEY }}" ]] || { echo "Missing repo secret: DJANGO_SECRET_KEY"; exit 1; }
 
       - name: Ensure ACA environment exists
         shell: bash
@@ -256,22 +257,40 @@ jobs:
           fi
 
       - name: Verify backend revision
+        shell: bash
         run: |
+          set -euo pipefail
+          RG="${{ vars.AZURE_RESOURCE_GROUP }}"
+          APP="${{ vars.BACKEND_APP_NAME }}"
           FQDN=$(az containerapp show \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.BACKEND_APP_NAME }}" \
+            --resource-group "$RG" \
+            --name "$APP" \
             --query "properties.latestRevisionFqdn" -o tsv)
-          echo "Checking https://${FQDN}/api/health/"
-          if ! curl --fail --retry 5 --retry-delay 10 --retry-all-errors --connect-timeout 10 --max-time 30 "https://${FQDN}/api/health/"; then
-            echo "Backend health check failed. Fetching recent system and app logs..."
+
+          LATEST_REV="$(az containerapp show --resource-group "$RG" --name "$APP" --query 'properties.latestRevisionName' -o tsv || true)"
+          READY_REV="$(az containerapp show --resource-group "$RG" --name "$APP" --query 'properties.latestReadyRevisionName' -o tsv || true)"
+          echo "Latest revision: ${LATEST_REV}"
+          echo "Latest ready revision: ${READY_REV}"
+
+          echo "Checking backend health endpoints at https://${FQDN} ..."
+          if ! (
+            curl --fail --retry 3 --retry-delay 8 --retry-all-errors --connect-timeout 8 --max-time 20 "https://${FQDN}/api/health/" ||
+            curl --fail --retry 3 --retry-delay 8 --retry-all-errors --connect-timeout 8 --max-time 20 "https://${FQDN}/api/health"
+          ); then
+            echo "Backend health check failed. Fetching revision summary and recent logs..."
+            az containerapp revision list \
+              --resource-group "$RG" \
+              --name "$APP" \
+              --query "[].{name:name,active:properties.active,created:properties.createdTime,runningState:properties.runningState,healthState:properties.healthState,provisioningState:properties.provisioningState}" \
+              -o table || true
             az containerapp logs show \
-              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-              --name "${{ vars.BACKEND_APP_NAME }}" \
+              --resource-group "$RG" \
+              --name "$APP" \
               --type system \
               --tail 100 || true
             az containerapp logs show \
-              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-              --name "${{ vars.BACKEND_APP_NAME }}" \
+              --resource-group "$RG" \
+              --name "$APP" \
               --tail 100 || true
             exit 1
           fi

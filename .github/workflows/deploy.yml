@@ -48,8 +48,8 @@ jobs:
           [[ -n "${{ vars.AZURE_RESOURCE_GROUP }}" ]] || { echo "Missing repo variable: AZURE_RESOURCE_GROUP"; exit 1; }
           [[ -n "${{ vars.BACKEND_APP_NAME }}" ]] || { echo "Missing repo variable: BACKEND_APP_NAME"; exit 1; }
           [[ -n "${{ vars.FRONTEND_APP_NAME }}" ]] || { echo "Missing repo variable: FRONTEND_APP_NAME"; exit 1; }
-          [[ -n "${{ vars.ACR_LOGIN_SERVER }}" ]] || { echo "Missing repo variable: ACR_LOGIN_SERVER"; exit 1; }
-          [[ -n "${{ secrets.PG_ADMIN_PASSWORD }}" ]] || { echo "Missing repo secret: PG_ADMIN_PASSWORD"; exit 1; }
+          [[ -n "${{ vars.ACR_LOGIN_SERVER || vars.ACR_NAME }}" ]] || { echo "Missing repo variable: set ACR_LOGIN_SERVER or ACR_NAME"; exit 1; }
+          [[ -n "${{ secrets.PG_ADMIN_PASSWORD || secrets.POSTGRES_PASSWORD }}" ]] || { echo "Missing repo secret: set PG_ADMIN_PASSWORD or POSTGRES_PASSWORD"; exit 1; }
           [[ -n "${{ secrets.DJANGO_SECRET_KEY }}" ]] || { echo "Missing repo secret: DJANGO_SECRET_KEY"; exit 1; }
 
       - name: Setup Terraform
@@ -73,7 +73,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
-          TF_VAR_pg_admin_password: ${{ secrets.PG_ADMIN_PASSWORD }}
+          TF_VAR_pg_admin_password: ${{ secrets.PG_ADMIN_PASSWORD || secrets.POSTGRES_PASSWORD }}
           TF_VAR_django_secret_key: ${{ secrets.DJANGO_SECRET_KEY }}
           TF_VAR_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
           TF_VAR_aca_env_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
@@ -89,7 +89,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: true
           ARM_USE_AZUREAD: true
-          TF_VAR_pg_admin_password: ${{ secrets.PG_ADMIN_PASSWORD }}
+          TF_VAR_pg_admin_password: ${{ secrets.PG_ADMIN_PASSWORD || secrets.POSTGRES_PASSWORD }}
           TF_VAR_django_secret_key: ${{ secrets.DJANGO_SECRET_KEY }}
           TF_VAR_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
           TF_VAR_aca_env_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
@@ -106,7 +106,7 @@ jobs:
 
       - name: Deploy backend
         run: |
-          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER }}/verirag-backend:${{ github.sha }}"
+          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER || format('{0}.azurecr.io', vars.ACR_NAME || 'acrvaibhavrag2026') }}/verirag-backend:${{ github.sha }}"
           az containerapp update \
             --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
             --name ${{ vars.BACKEND_APP_NAME }} \
@@ -114,7 +114,7 @@ jobs:
 
       - name: Deploy frontend
         run: |
-          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}"
+          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER || format('{0}.azurecr.io', vars.ACR_NAME || 'acrvaibhavrag2026') }}/verirag-frontend:${{ github.sha }}"
           az containerapp update \
             --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
             --name ${{ vars.FRONTEND_APP_NAME }} \

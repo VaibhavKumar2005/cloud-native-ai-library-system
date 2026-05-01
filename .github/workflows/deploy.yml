@@ -7,10 +7,9 @@ on:
         description: 'Git ref to deploy'
         required: true
         default: 'main'
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'production'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   contents: read
@@ -21,8 +20,6 @@ jobs:
     name: Deploy to Azure Container Apps
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment:
-      name: ${{ inputs.environment }}
 
     steps:
       - uses: actions/checkout@v4

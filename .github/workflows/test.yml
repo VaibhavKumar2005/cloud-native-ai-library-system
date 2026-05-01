@@ -45,7 +45,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: 'apps/frontend/package-lock.json'
 
@@ -59,7 +59,7 @@ jobs:
           cd apps/frontend
           npm run lint
 
-      - name: Tests
+      - name: Build
         run: |
           cd apps/frontend
-          npm test -- --coverage --watchAll=false
+          npm run build

@@ -129,14 +129,7 @@ jobs:
           [[ -n "${{ vars.BACKEND_APP_NAME }}" ]] || { echo "Missing repo variable: BACKEND_APP_NAME"; exit 1; }
           [[ -n "${{ vars.FRONTEND_APP_NAME }}" ]] || { echo "Missing repo variable: FRONTEND_APP_NAME"; exit 1; }
           [[ -n "${{ secrets.DJANGO_SECRET_KEY }}" ]] || { echo "Missing repo secret: DJANGO_SECRET_KEY"; exit 1; }
-          [[ -n "${{ secrets.POSTGRES_HOST }}" ]] || { echo "Missing repo secret: POSTGRES_HOST"; exit 1; }
-          [[ -n "${{ secrets.POSTGRES_DB }}" ]] || { echo "Missing repo secret: POSTGRES_DB"; exit 1; }
-          [[ -n "${{ secrets.POSTGRES_USER }}" ]] || { echo "Missing repo secret: POSTGRES_USER"; exit 1; }
-          [[ -n "${{ secrets.POSTGRES_PASSWORD }}" ]] || { echo "Missing repo secret: POSTGRES_PASSWORD"; exit 1; }
-          [[ -n "${{ secrets.REDIS_URL }}" ]] || { echo "Missing repo secret: REDIS_URL"; exit 1; }
-          [[ -n "${{ secrets.AZURE_OPENAI_ENDPOINT }}" ]] || { echo "Missing repo secret: AZURE_OPENAI_ENDPOINT"; exit 1; }
-          [[ -n "${{ secrets.AZURE_OPENAI_API_KEY }}" ]] || { echo "Missing repo secret: AZURE_OPENAI_API_KEY"; exit 1; }
-          [[ -n "${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}" ]] || { echo "Missing repo secret: AZURE_OPENAI_DEPLOYMENT_NAME"; exit 1; }
+          echo "Optional runtime secrets (POSTGRES_*, REDIS_URL, AZURE_OPENAI_*) can be provided, but are not required in demo-safe deploy mode."
 
       - name: Ensure ACA environment exists
         shell: bash
@@ -205,16 +198,12 @@ jobs:
               --min-replicas 1 \
               --set-env-vars \
                 ENVIRONMENT="${{ env.DEPLOY_ENVIRONMENT }}" \
-                DEPLOY_MODE=cloud \
+                DEPLOY_MODE=local \
+                DEBUG=true \
+                DEMO_MODE=true \
+                USE_SQLITE_FOR_TESTS=true \
                 DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
-                POSTGRES_HOST="${{ secrets.POSTGRES_HOST }}" \
-                POSTGRES_DB="${{ secrets.POSTGRES_DB }}" \
-                POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
-                POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-                REDIS_URL="${{ secrets.REDIS_URL }}" \
-                AZURE_OPENAI_ENDPOINT="${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
-                AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
-                AZURE_OPENAI_DEPLOYMENT_NAME="${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}"
+                ALLOWED_HOSTS="${{ vars.BACKEND_APP_NAME }}.ashyriver-f016f32f.westus2.azurecontainerapps.io,${{ vars.FRONTEND_APP_NAME }}.ashyriver-f016f32f.westus2.azurecontainerapps.io,localhost,127.0.0.1"
           else
             az containerapp create \
               --name "$APP" \
@@ -228,16 +217,12 @@ jobs:
               --ingress external \
               --env-vars \
                 ENVIRONMENT="${{ env.DEPLOY_ENVIRONMENT }}" \
-                DEPLOY_MODE=cloud \
+                DEPLOY_MODE=local \
+                DEBUG=true \
+                DEMO_MODE=true \
+                USE_SQLITE_FOR_TESTS=true \
                 DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
-                POSTGRES_HOST="${{ secrets.POSTGRES_HOST }}" \
-                POSTGRES_DB="${{ secrets.POSTGRES_DB }}" \
-                POSTGRES_USER="${{ secrets.POSTGRES_USER }}" \
-                POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}" \
-                REDIS_URL="${{ secrets.REDIS_URL }}" \
-                AZURE_OPENAI_ENDPOINT="${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
-                AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
-                AZURE_OPENAI_DEPLOYMENT_NAME="${{ secrets.AZURE_OPENAI_DEPLOYMENT_NAME }}" \
+                ALLOWED_HOSTS="${{ vars.BACKEND_APP_NAME }}.ashyriver-f016f32f.westus2.azurecontainerapps.io,${{ vars.FRONTEND_APP_NAME }}.ashyriver-f016f32f.westus2.azurecontainerapps.io,localhost,127.0.0.1" \
               --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
               --registry-username "${{ steps.acr-creds.outputs.username }}" \
               --registry-password "${{ steps.acr-creds.outputs.password }}"

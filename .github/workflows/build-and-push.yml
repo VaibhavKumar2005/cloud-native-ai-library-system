@@ -11,6 +11,10 @@ on:
 env:
   ACR_NAME: ${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}
   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER || 'acrvaibhavrag2026.azurecr.io' }}
+  ACA_ENV_NAME: ${{ vars.ACA_ENV_NAME || 'verirag-env' }}
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'centralindia' }}
+  BACKEND_TARGET_PORT: ${{ vars.BACKEND_TARGET_PORT || '8000' }}
+  FRONTEND_TARGET_PORT: ${{ vars.FRONTEND_TARGET_PORT || '8080' }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
@@ -100,21 +104,86 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy backend image to ACA
-        uses: azure/container-apps-deploy-action@v1
-        with:
-          acrName: ${{ env.ACR_NAME }}
-          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
-          containerAppName: ${{ vars.BACKEND_APP_NAME }}
-          imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/verirag-backend:${{ github.sha }}
+      - name: Validate required deployment variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${{ vars.AZURE_RESOURCE_GROUP }}" ]] || { echo "Missing repo variable: AZURE_RESOURCE_GROUP"; exit 1; }
+          [[ -n "${{ vars.BACKEND_APP_NAME }}" ]] || { echo "Missing repo variable: BACKEND_APP_NAME"; exit 1; }
+          [[ -n "${{ vars.FRONTEND_APP_NAME }}" ]] || { echo "Missing repo variable: FRONTEND_APP_NAME"; exit 1; }
 
-      - name: Deploy frontend image to ACA
-        uses: azure/container-apps-deploy-action@v1
-        with:
-          acrName: ${{ env.ACR_NAME }}
-          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
-          containerAppName: ${{ vars.FRONTEND_APP_NAME }}
-          imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}
+      - name: Ensure ACA environment exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG="${{ vars.AZURE_RESOURCE_GROUP }}"
+          ENV_NAME="${{ env.ACA_ENV_NAME }}"
+
+          if az containerapp env show --name "$ENV_NAME" --resource-group "$RG" >/dev/null 2>&1; then
+            echo "ACA environment exists: $ENV_NAME"
+          else
+            echo "Creating ACA environment: $ENV_NAME in $RG"
+            az containerapp env create \
+              --name "$ENV_NAME" \
+              --resource-group "$RG" \
+              --location "${{ env.AZURE_LOCATION }}"
+          fi
+
+      - name: Get ACR admin credentials
+        id: acr-creds
+        shell: bash
+        run: |
+          set -euo pipefail
+          USERNAME="$(az acr credential show --name '${{ env.ACR_NAME }}' --query 'username' -o tsv)"
+          PASSWORD="$(az acr credential show --name '${{ env.ACR_NAME }}' --query 'passwords[0].value' -o tsv)"
+          echo "username=$USERNAME" >> "$GITHUB_OUTPUT"
+          echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy backend image (create or update)
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG="${{ vars.AZURE_RESOURCE_GROUP }}"
+          APP="${{ vars.BACKEND_APP_NAME }}"
+          IMAGE="${{ env.ACR_LOGIN_SERVER }}/verirag-backend:${{ github.sha }}"
+
+          if az containerapp show --name "$APP" --resource-group "$RG" >/dev/null 2>&1; then
+            az containerapp update --name "$APP" --resource-group "$RG" --image "$IMAGE"
+          else
+            az containerapp create \
+              --name "$APP" \
+              --resource-group "$RG" \
+              --environment "${{ env.ACA_ENV_NAME }}" \
+              --image "$IMAGE" \
+              --target-port "${{ env.BACKEND_TARGET_PORT }}" \
+              --ingress external \
+              --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
+              --registry-username "${{ steps.acr-creds.outputs.username }}" \
+              --registry-password "${{ steps.acr-creds.outputs.password }}"
+          fi
+
+      - name: Deploy frontend image (create or update)
+        shell: bash
+        run: |
+          set -euo pipefail
+          RG="${{ vars.AZURE_RESOURCE_GROUP }}"
+          APP="${{ vars.FRONTEND_APP_NAME }}"
+          IMAGE="${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}"
+
+          if az containerapp show --name "$APP" --resource-group "$RG" >/dev/null 2>&1; then
+            az containerapp update --name "$APP" --resource-group "$RG" --image "$IMAGE"
+          else
+            az containerapp create \
+              --name "$APP" \
+              --resource-group "$RG" \
+              --environment "${{ env.ACA_ENV_NAME }}" \
+              --image "$IMAGE" \
+              --target-port "${{ env.FRONTEND_TARGET_PORT }}" \
+              --ingress external \
+              --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
+              --registry-username "${{ steps.acr-creds.outputs.username }}" \
+              --registry-password "${{ steps.acr-creds.outputs.password }}"
+          fi
 
       - name: Verify backend revision
         run: |

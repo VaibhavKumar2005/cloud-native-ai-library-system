@@ -230,7 +230,7 @@ RAG Pipeline Engine
         ↓
 Embedding Model (Google)
 Vector Store (PostgreSQL+pgvector)
-LLM APIs (Gemini, Groq)
+LLM API (Azure OpenAI)
 Redis Cache
 ```
 
@@ -238,10 +238,9 @@ Redis Cache
 
 | Component | Technology | Why |
 |-----------|-----------|-----|
-| **Embeddings** | Google text-embedding-004 | Proven on academic texts |
+| **Embeddings** | Azure OpenAI embeddings | Managed, production-ready |
 | **Vector Store** | PostgreSQL + pgvector | Self-hosted, reproducible |
-| **LLM** | Google Gemini 1.5 Flash | Fast, cost-effective |
-| **Fallback** | Groq Llama-3 8B | Open source, transparent |
+| **LLM** | Azure OpenAI chat model | Grounded answer synthesis |
 | **Caching** | Redis | Reduces API costs |
 
 ---
@@ -257,7 +256,7 @@ Redis Cache
 
 ### External Dependencies
 
-- **Google API**: Embedding and LLM generation (required)
+- **Azure OpenAI**: Embedding and generation (required)
 - **PostgreSQL**: Vector store must be running (required)
 - **arXiv/Semantic Scholar APIs** (optional, if enabled)
 
@@ -304,7 +303,7 @@ git clone https://github.com/VaibhavKumar2005/cloud-native-ai-library-system.git
 
 # 2. Configure
 cp .env.example .env
-# Edit .env: GOOGLE_API_KEY, GROQ_API_KEY
+# Edit .env: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT_NAME
 
 # 3. Launch
 docker-compose up --build

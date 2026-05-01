@@ -38,7 +38,7 @@ User Query
     ↓
 [2] RANK → Order by relevance + check confidence
     ↓
-[3] GENERATE → Use Gemini to synthesize answer from top chunks
+[3] GENERATE → Use configured Azure OpenAI model to synthesize answer from top chunks
     ↓
 [4] VERIFY → Check if answer is grounded in source documents
     ↓
@@ -70,8 +70,8 @@ User Query
     ┌──────────┴────────┐      ┌──────────┴──────────────┐
     │                   │      │                         │
 ┌───▼────────┐  ┌──────▼─┐   ┌┴───────┐        ┌─────────▼────┐
-│ PostgreSQL │  │ pgvec  │   │ Redis  │        │ LLM APIs     │
-│ (documents)│  │ (embs) │   │ (cache)│        │ - Gemini 1.5 │
+│ PostgreSQL │  │ pgvec  │   │ Redis  │        │ LLM API      │
+│ (documents)│  │ (embs) │   │ (cache)│        │ - Azure OpenAI │
 │            │  │        │   │        │        │ - Groq/Llama │
 └────────────┘  └────────┘   └────────┘        └──────────────┘
 
@@ -87,7 +87,7 @@ User Query
 |---------|-------------|
 | **Citation Grounding** | Every answer includes source document references |
 | **Hallucination Detection** | Scores each answer; rejects if confidence < 0.6 |
-| **Dual LLM Failover** | If Gemini answer is weak, regenerate with Groq |
+| **Grounded Generation** | Generates answers only from retrieved evidence |
 | **PDF Ingestion** | Upload papers → automatic chunking → vector embedding |
 | **Academic Search** | Query arXiv, Semantic Scholar, Patents within the platform |
 | **Evaluation Metrics** | RAGAS scoring (faithfulness, relevancy, precision) |
@@ -143,8 +143,7 @@ Q: "Explain quantum computing in detail"
 ### Prerequisites
 - Docker Desktop (Windows/Mac/Linux)
 - API Keys:
-  - [Google Gemini API](https://aistudio.google.com/app/apikey)
-  - [Groq API](https://console.groq.com) (optional, for fallback)
+  - Azure OpenAI resource with a deployed chat model
 
 ### Quick Start
 
@@ -180,8 +179,9 @@ Q: "Explain quantum computing in detail"
 ### Environment Variables (Required)
 ```env
 DJANGO_SECRET_KEY=<your-secret>
-GOOGLE_API_KEY=<your-gemini-key>
-GROQ_API_KEY=<your-groq-key>  # Optional
+AZURE_OPENAI_ENDPOINT=<your-azure-openai-endpoint>
+AZURE_OPENAI_API_KEY=<your-azure-openai-api-key>
+AZURE_OPENAI_DEPLOYMENT_NAME=<your-deployment-name>
 POSTGRES_HOST=rag-db
 POSTGRES_DB=verirag_db
 POSTGRES_USER=admin
@@ -291,9 +291,9 @@ See [docs/evaluation.md](docs/evaluation.md) for the complete evaluation framewo
 - **No real-time collaboration**: Single-user or basic team access
 
 ### External Dependencies
-- **Google Gemini API**: Required for generation. Fallback is Groq/Llama-3.
+- **Azure OpenAI**: Required for generation.
 - **PostgreSQL + pgvector**: Must be running for vector search.
-- **Embeddings**: Uses Google's embedding model. Can be swapped for OpenAI/Hugging Face.
+- **Embeddings**: Uses an Azure OpenAI embedding deployment.
 
 ### Known Constraints
 - **Context window**: Limited to top-10 chunks (reduce for cost, increase for accuracy)

@@ -1,16 +1,7 @@
 name: Security
 
 on:
-  push:
-    branches: [main, develop]
-    paths:
-      - 'apps/**'
-      - 'Dockerfile'
-      - '.github/workflows/security.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'apps/**'
+  workflow_dispatch:
   schedule:
     - cron: '0 2 * * 0'  # Weekly scan on Sundays
 
@@ -25,7 +16,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build backend image
         run: |
@@ -54,7 +45,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build frontend image
         run: |

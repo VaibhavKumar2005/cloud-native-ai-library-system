@@ -15,11 +15,16 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: deploy-aca-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to Azure Container Apps
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    environment: production
 
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +37,73 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure latest Azure CLI containerapp extension
+        run: |
+          az extension add --name containerapp --upgrade
+
+      - name: Validate required vars and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${{ vars.AZURE_RESOURCE_GROUP }}" ]] || { echo "Missing repo variable: AZURE_RESOURCE_GROUP"; exit 1; }
+          [[ -n "${{ vars.BACKEND_APP_NAME }}" ]] || { echo "Missing repo variable: BACKEND_APP_NAME"; exit 1; }
+          [[ -n "${{ vars.FRONTEND_APP_NAME }}" ]] || { echo "Missing repo variable: FRONTEND_APP_NAME"; exit 1; }
+          [[ -n "${{ vars.ACR_LOGIN_SERVER }}" ]] || { echo "Missing repo variable: ACR_LOGIN_SERVER"; exit 1; }
+          [[ -n "${{ secrets.PG_ADMIN_PASSWORD }}" ]] || { echo "Missing repo secret: PG_ADMIN_PASSWORD"; exit 1; }
+          [[ -n "${{ secrets.DJANGO_SECRET_KEY }}" ]] || { echo "Missing repo secret: DJANGO_SECRET_KEY"; exit 1; }
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: ops/infrastructure
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+          ARM_USE_AZUREAD: true
+        run: terraform init -input=false
+
+      - name: Terraform Plan
+        working-directory: ops/infrastructure
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+          ARM_USE_AZUREAD: true
+          TF_VAR_pg_admin_password: ${{ secrets.PG_ADMIN_PASSWORD }}
+          TF_VAR_django_secret_key: ${{ secrets.DJANGO_SECRET_KEY }}
+          TF_VAR_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
+          TF_VAR_aca_env_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
+          TF_VAR_acr_name: ${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}
+          TF_VAR_aca_env_name: ${{ vars.ACA_ENV_NAME || 'verirag-env' }}
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform Apply (Create/Update Infra First)
+        working-directory: ops/infrastructure
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
+          ARM_USE_AZUREAD: true
+          TF_VAR_pg_admin_password: ${{ secrets.PG_ADMIN_PASSWORD }}
+          TF_VAR_django_secret_key: ${{ secrets.DJANGO_SECRET_KEY }}
+          TF_VAR_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
+          TF_VAR_aca_env_location: ${{ vars.AZURE_LOCATION || 'centralindia' }}
+          TF_VAR_acr_name: ${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}
+          TF_VAR_aca_env_name: ${{ vars.ACA_ENV_NAME || 'verirag-env' }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Confirm ACA apps exist after Terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+          az containerapp show --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" --name "${{ vars.BACKEND_APP_NAME }}" >/dev/null
+          az containerapp show --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" --name "${{ vars.FRONTEND_APP_NAME }}" >/dev/null
 
       - name: Deploy backend
         run: |

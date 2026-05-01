@@ -42,6 +42,11 @@ from ai_engine.faithfulness_scorer import (
     score_answer,
     FAITHFULNESS_THRESHOLD,
 )
+from ai_engine.vault_config import (
+    get_api_key_from_vault,
+    get_groq_api_key,
+    _api_key_cache,
+)
 
 # 🚨 FIX: Handle duplicate Prometheus metric registration during module re-import
 # When Django imports this module multiple times during URL resolution,

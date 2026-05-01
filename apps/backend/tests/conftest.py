@@ -90,7 +90,7 @@ def mock_vault():
     Returns the mock client for assertions.
     """
     with patch.dict("os.environ", {"VAULT_TOKEN": "test-vault-token"}, clear=False), \
-         patch("ai_engine.rag_logic.hvac.Client") as MockClient:
+         patch("ai_engine.vault_config.hvac.Client") as MockClient:
         instance = MockClient.return_value
         instance.is_authenticated.return_value = True
         instance.sys.is_initialized.return_value = True
@@ -109,7 +109,7 @@ def mock_vault():
 @pytest.fixture
 def mock_vault_sealed():
     """Mock a sealed Vault instance."""
-    with patch("ai_engine.rag_logic.hvac.Client") as MockClient:
+    with patch("ai_engine.vault_config.hvac.Client") as MockClient:
         instance = MockClient.return_value
         instance.is_authenticated.return_value = True
         instance.sys.is_initialized.return_value = True
@@ -120,7 +120,7 @@ def mock_vault_sealed():
 @pytest.fixture
 def mock_vault_unreachable():
     """Mock an unreachable Vault instance."""
-    with patch("ai_engine.rag_logic.hvac.Client") as MockClient:
+    with patch("ai_engine.vault_config.hvac.Client") as MockClient:
         MockClient.side_effect = Exception("Connection refused")
         yield MockClient
 

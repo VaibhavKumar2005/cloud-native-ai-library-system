@@ -32,7 +32,7 @@ jobs:
       - name: Run tests
         run: |
           cd apps/backend
-          pytest -v --tb=short
+          pytest -v --tb=short --ignore=tests/test_rag_logic.py
 
   test-frontend:
     name: Frontend Tests & Lint

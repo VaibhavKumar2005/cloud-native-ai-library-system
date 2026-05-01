@@ -19,6 +19,7 @@ env:
   BACKEND_MEMORY: ${{ vars.BACKEND_MEMORY || '1.0Gi' }}
   FRONTEND_CPU: ${{ vars.FRONTEND_CPU || '0.5' }}
   FRONTEND_MEMORY: ${{ vars.FRONTEND_MEMORY || '1.0Gi' }}
+  DEPLOY_ENVIRONMENT: ${{ vars.DEPLOY_ENVIRONMENT || 'development' }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
@@ -176,7 +177,15 @@ jobs:
               --server "${{ env.ACR_LOGIN_SERVER }}" \
               --username "${{ steps.acr-creds.outputs.username }}" \
               --password "${{ steps.acr-creds.outputs.password }}"
-            az containerapp update --name "$APP" --resource-group "$RG" --image "$IMAGE"
+            az containerapp update \
+              --name "$APP" \
+              --resource-group "$RG" \
+              --image "$IMAGE" \
+              --min-replicas 1 \
+              --set-env-vars \
+                ENVIRONMENT="${{ env.DEPLOY_ENVIRONMENT }}" \
+                DEPLOY_MODE=cloud \
+                DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}"
           else
             az containerapp create \
               --name "$APP" \
@@ -186,7 +195,12 @@ jobs:
               --target-port "${{ env.BACKEND_TARGET_PORT }}" \
               --cpu "${{ env.BACKEND_CPU }}" \
               --memory "${{ env.BACKEND_MEMORY }}" \
+              --min-replicas 1 \
               --ingress external \
+              --env-vars \
+                ENVIRONMENT="${{ env.DEPLOY_ENVIRONMENT }}" \
+                DEPLOY_MODE=cloud \
+                DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
               --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
               --registry-username "${{ steps.acr-creds.outputs.username }}" \
               --registry-password "${{ steps.acr-creds.outputs.password }}"
@@ -247,4 +261,17 @@ jobs:
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ vars.BACKEND_APP_NAME }}" \
             --query "properties.latestRevisionFqdn" -o tsv)
-          curl --fail --retry 12 --retry-delay 10 "https://${FQDN}/api/health/"
+          echo "Checking https://${FQDN}/api/health/"
+          if ! curl --fail --retry 5 --retry-delay 10 --retry-all-errors --connect-timeout 10 --max-time 30 "https://${FQDN}/api/health/"; then
+            echo "Backend health check failed. Fetching recent system and app logs..."
+            az containerapp logs show \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "${{ vars.BACKEND_APP_NAME }}" \
+              --type system \
+              --tail 100 || true
+            az containerapp logs show \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --name "${{ vars.BACKEND_APP_NAME }}" \
+              --tail 100 || true
+            exit 1
+          fi

@@ -286,7 +286,7 @@ jobs:
           FQDN=$(az containerapp show \
             --resource-group "$RG" \
             --name "$APP" \
-            --query "properties.latestRevisionFqdn" -o tsv)
+            --query "properties.configuration.ingress.fqdn" -o tsv)
 
           LATEST_REV="$(az containerapp show --resource-group "$RG" --name "$APP" --query 'properties.latestRevisionName' -o tsv || true)"
           READY_REV="$(az containerapp show --resource-group "$RG" --name "$APP" --query 'properties.latestReadyRevisionName' -o tsv || true)"

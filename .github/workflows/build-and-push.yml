@@ -152,6 +152,24 @@ jobs:
           IMAGE="${{ env.ACR_LOGIN_SERVER }}/verirag-backend:${{ github.sha }}"
 
           if az containerapp show --name "$APP" --resource-group "$RG" >/dev/null 2>&1; then
+            STATE="$(az containerapp show --name "$APP" --resource-group "$RG" --query 'properties.provisioningState' -o tsv || true)"
+            if [[ "$STATE" == "Failed" ]]; then
+              echo "Container app $APP is in Failed state. Recreating..."
+              az containerapp delete --name "$APP" --resource-group "$RG" --yes
+              az containerapp create \
+                --name "$APP" \
+                --resource-group "$RG" \
+                --environment "${{ env.ACA_ENV_NAME }}" \
+                --image "$IMAGE" \
+                --target-port "${{ env.BACKEND_TARGET_PORT }}" \
+                --cpu "${{ env.BACKEND_CPU }}" \
+                --memory "${{ env.BACKEND_MEMORY }}" \
+                --ingress external \
+                --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
+                --registry-username "${{ steps.acr-creds.outputs.username }}" \
+                --registry-password "${{ steps.acr-creds.outputs.password }}"
+              exit 0
+            fi
             az containerapp registry set \
               --name "$APP" \
               --resource-group "$RG" \
@@ -183,6 +201,24 @@ jobs:
           IMAGE="${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}"
 
           if az containerapp show --name "$APP" --resource-group "$RG" >/dev/null 2>&1; then
+            STATE="$(az containerapp show --name "$APP" --resource-group "$RG" --query 'properties.provisioningState' -o tsv || true)"
+            if [[ "$STATE" == "Failed" ]]; then
+              echo "Container app $APP is in Failed state. Recreating..."
+              az containerapp delete --name "$APP" --resource-group "$RG" --yes
+              az containerapp create \
+                --name "$APP" \
+                --resource-group "$RG" \
+                --environment "${{ env.ACA_ENV_NAME }}" \
+                --image "$IMAGE" \
+                --target-port "${{ env.FRONTEND_TARGET_PORT }}" \
+                --cpu "${{ env.FRONTEND_CPU }}" \
+                --memory "${{ env.FRONTEND_MEMORY }}" \
+                --ingress external \
+                --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
+                --registry-username "${{ steps.acr-creds.outputs.username }}" \
+                --registry-password "${{ steps.acr-creds.outputs.password }}"
+              exit 0
+            fi
             az containerapp registry set \
               --name "$APP" \
               --resource-group "$RG" \

@@ -24,7 +24,6 @@ jobs:
     name: Deploy to Azure Container Apps
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment: production
 
     steps:
       - uses: actions/checkout@v4

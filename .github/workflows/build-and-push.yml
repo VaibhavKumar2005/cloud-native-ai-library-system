@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - 'apps/**'
-      - 'Dockerfile'
       - '.github/workflows/build-and-push.yml'
   workflow_dispatch:
 
@@ -26,7 +25,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -59,7 +58,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -101,19 +100,21 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy backend revision
-        run: |
-          az containerapp update \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.BACKEND_APP_NAME }}" \
-            --image "${{ env.ACR_LOGIN_SERVER }}/verirag-backend:${{ github.sha }}"
+      - name: Deploy backend image to ACA
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          acrName: ${{ env.ACR_NAME }}
+          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          containerAppName: ${{ vars.BACKEND_APP_NAME }}
+          imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/verirag-backend:${{ github.sha }}
 
-      - name: Deploy frontend revision
-        run: |
-          az containerapp update \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.FRONTEND_APP_NAME }}" \
-            --image "${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}"
+      - name: Deploy frontend image to ACA
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          acrName: ${{ env.ACR_NAME }}
+          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          containerAppName: ${{ vars.FRONTEND_APP_NAME }}
+          imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}
 
       - name: Verify backend revision
         run: |

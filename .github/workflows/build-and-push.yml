@@ -12,6 +12,10 @@ on:
         description: 'Build frontend with VITE_DEMO_MODE=true'
         required: false
         default: 'false'
+      frontend_api_url:
+        description: 'Frontend API base URL (e.g. https://<backend-fqdn>)'
+        required: false
+        default: 'https://ca-verirag-dev-backend.ashyriver-f016f32f.westus2.azurecontainerapps.io'
 
 env:
   ACR_NAME: ${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}
@@ -95,6 +99,7 @@ jobs:
           push: true
           build-args: |
             VITE_DEMO_MODE=${{ github.event.inputs.frontend_demo_mode || 'false' }}
+            VITE_API_URL=${{ github.event.inputs.frontend_api_url || vars.VITE_API_URL || 'https://ca-verirag-dev-backend.ashyriver-f016f32f.westus2.azurecontainerapps.io' }}
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}
             ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:latest

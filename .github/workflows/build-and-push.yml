@@ -7,6 +7,11 @@ on:
       - 'apps/**'
       - '.github/workflows/build-and-push.yml'
   workflow_dispatch:
+    inputs:
+      frontend_demo_mode:
+        description: 'Build frontend with VITE_DEMO_MODE=true'
+        required: false
+        default: 'false'
 
 env:
   ACR_NAME: ${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}
@@ -88,6 +93,8 @@ jobs:
           context: apps/frontend
           file: apps/frontend/Dockerfile
           push: true
+          build-args: |
+            VITE_DEMO_MODE=${{ github.event.inputs.frontend_demo_mode || 'false' }}
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}
             ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:latest

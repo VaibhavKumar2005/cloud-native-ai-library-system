@@ -15,6 +15,10 @@ env:
   AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'centralindia' }}
   BACKEND_TARGET_PORT: ${{ vars.BACKEND_TARGET_PORT || '8000' }}
   FRONTEND_TARGET_PORT: ${{ vars.FRONTEND_TARGET_PORT || '8080' }}
+  BACKEND_CPU: ${{ vars.BACKEND_CPU || '0.5' }}
+  BACKEND_MEMORY: ${{ vars.BACKEND_MEMORY || '1.0Gi' }}
+  FRONTEND_CPU: ${{ vars.FRONTEND_CPU || '0.5' }}
+  FRONTEND_MEMORY: ${{ vars.FRONTEND_MEMORY || '1.0Gi' }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
@@ -162,6 +166,8 @@ jobs:
               --environment "${{ env.ACA_ENV_NAME }}" \
               --image "$IMAGE" \
               --target-port "${{ env.BACKEND_TARGET_PORT }}" \
+              --cpu "${{ env.BACKEND_CPU }}" \
+              --memory "${{ env.BACKEND_MEMORY }}" \
               --ingress external \
               --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
               --registry-username "${{ steps.acr-creds.outputs.username }}" \
@@ -191,6 +197,8 @@ jobs:
               --environment "${{ env.ACA_ENV_NAME }}" \
               --image "$IMAGE" \
               --target-port "${{ env.FRONTEND_TARGET_PORT }}" \
+              --cpu "${{ env.FRONTEND_CPU }}" \
+              --memory "${{ env.FRONTEND_MEMORY }}" \
               --ingress external \
               --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
               --registry-username "${{ steps.acr-creds.outputs.username }}" \

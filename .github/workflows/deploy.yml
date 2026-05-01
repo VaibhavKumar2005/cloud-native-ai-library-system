@@ -7,6 +7,10 @@ on:
         description: 'Git ref to deploy'
         required: true
         default: 'main'
+      image_tag:
+        description: 'ACR image tag to deploy (for both backend/frontend)'
+        required: true
+        default: 'latest'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -121,9 +125,33 @@ jobs:
           az containerapp show --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" --name "${{ vars.BACKEND_APP_NAME }}" >/dev/null
           az containerapp show --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" --name "${{ vars.FRONTEND_APP_NAME }}" >/dev/null
 
+      - name: Resolve deploy image tag
+        id: image-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACR_NAME="${{ vars.ACR_NAME || 'acrvaibhavrag2026' }}"
+          REQUESTED_TAG="${{ inputs.image_tag }}"
+          BACKEND_REPO="verirag-backend"
+          FRONTEND_REPO="verirag-frontend"
+
+          backend_exists="$(az acr repository show-tags --name "$ACR_NAME" --repository "$BACKEND_REPO" --query "contains(@, '$REQUESTED_TAG')" -o tsv)"
+          frontend_exists="$(az acr repository show-tags --name "$ACR_NAME" --repository "$FRONTEND_REPO" --query "contains(@, '$REQUESTED_TAG')" -o tsv)"
+
+          if [[ "$backend_exists" == "true" && "$frontend_exists" == "true" ]]; then
+            echo "Using requested tag: $REQUESTED_TAG"
+            echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+          elif [[ "$REQUESTED_TAG" != "latest" ]]; then
+            echo "Requested tag '$REQUESTED_TAG' not found in both repos. Falling back to 'latest'."
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag 'latest' must exist in both $BACKEND_REPO and $FRONTEND_REPO but was not found."
+            exit 1
+          fi
+
       - name: Deploy backend
         run: |
-          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER || format('{0}.azurecr.io', vars.ACR_NAME || 'acrvaibhavrag2026') }}/verirag-backend:${{ github.sha }}"
+          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER || format('{0}.azurecr.io', vars.ACR_NAME || 'acrvaibhavrag2026') }}/verirag-backend:${{ steps.image-tag.outputs.tag }}"
           az containerapp update \
             --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
             --name ${{ vars.BACKEND_APP_NAME }} \
@@ -131,7 +159,7 @@ jobs:
 
       - name: Deploy frontend
         run: |
-          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER || format('{0}.azurecr.io', vars.ACR_NAME || 'acrvaibhavrag2026') }}/verirag-frontend:${{ github.sha }}"
+          IMAGE_URI="${{ vars.ACR_LOGIN_SERVER || format('{0}.azurecr.io', vars.ACR_NAME || 'acrvaibhavrag2026') }}/verirag-frontend:${{ steps.image-tag.outputs.tag }}"
           az containerapp update \
             --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
             --name ${{ vars.FRONTEND_APP_NAME }} \

@@ -10,6 +10,9 @@ permissions:
   contents: read
   security-events: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # ─────────────────────────────────────────────────────────────
   # BACKEND TESTS
@@ -69,6 +72,8 @@ jobs:
           POSTGRES_DB: verirag_test
           REDIS_URL: redis://localhost:6379/0
           DJANGO_SETTINGS_MODULE: rag_backend.settings
+          DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
+          ENVIRONMENT: development
         run: |
           cd apps/backend
           pytest tests/ -v --ignore=tests/test_rag_logic.py --cov=ai_engine --cov-report=xml

@@ -4,7 +4,7 @@
 ###############################################################################
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 
 # Security: Upgrade all OS packages to latest patched versions
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \

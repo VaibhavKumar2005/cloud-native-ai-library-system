@@ -1,5 +1,7 @@
 # VeriRAG Azure Container Apps Deployment Script
-# Deploys scale-to-zero infrastructure ($0 when idle)
+# For GitHub Student Pack - uses provided subscription ID
+
+$SubscriptionId = "b7d6d48a-9b60-420c-b046-1e1512b81243"
 
 Write-Host "[*] VeriRAG Azure Deployment (Scale-to-Zero)" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
@@ -22,12 +24,13 @@ Write-Host "[+] Prerequisites check passed" -ForegroundColor Green
 Write-Host "[*] Logging into Azure..." -ForegroundColor Yellow
 az login
 
-# Set subscription (if you have multiple)
-# az account set --subscription "YOUR_SUBSCRIPTION_ID"
+# Set subscription
+Write-Host "[*] Setting subscription to: $SubscriptionId" -ForegroundColor Yellow
+az account set --subscription $SubscriptionId
 
 # Show current subscription
 $sub = az account show --query "{Name:name, ID:id}" -o json | ConvertFrom-Json
-Write-Host "[+] Using subscription: $($sub.Name) ($($sub.ID))" -ForegroundColor Gray
+Write-Host "[+] Using subscription: $($sub.Name) ($($sub.ID))" -ForegroundColor Green
 
 # Generate secrets if terraform.tfvars doesn't exist
 if (!(Test-Path "terraform.tfvars")) {
@@ -82,6 +85,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[!] This will deploy to Azure and start consuming credits." -ForegroundColor Yellow
 Write-Host "    Estimated cost when idle: ~$1.50/day (PostgreSQL + Redis)" -ForegroundColor Yellow
 Write-Host "    Compute cost when idle: $0.00 (scale-to-zero)" -ForegroundColor Green
+Write-Host ""
 
 $confirm = Read-Host "Deploy now? (yes/no)"
 
@@ -108,8 +112,8 @@ Write-Host "[*] Next steps:" -ForegroundColor Yellow
 Write-Host "  1. Your API will be available at the backend_url shown above" -ForegroundColor Gray
 Write-Host "  2. Add your API keys to Azure Key Vault (see README.md)" -ForegroundColor Gray
 Write-Host "  3. Test the deployment with: curl https://YOUR_BACKEND_URL/api/health/" -ForegroundColor Gray
-Write-Host "  4. When idle, compute costs = $0 (scale-to-zero active)" -ForegroundColor Gray
-
+Write-Host "  4. When idle, compute costs = 0 (scale-to-zero active)" -ForegroundColor Gray
+Write-Host ""
 Write-Host "[*] Credit usage:" -ForegroundColor Yellow
-Write-Host "  - Your $100 Azure credits should last approximately 2 months" -ForegroundColor Gray
+Write-Host "  - Your GitHub Student Pack Azure credits allocated" -ForegroundColor Gray
 Write-Host "  - To stop charges: terraform destroy" -ForegroundColor Gray

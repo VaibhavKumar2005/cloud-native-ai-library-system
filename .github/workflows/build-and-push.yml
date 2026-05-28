@@ -2,7 +2,7 @@ name: Build & Push
 
 on:
   push:
-    branches: [main]
+    branches: [main, agents/azure-login-terraform-setup]
     paths:
       - 'apps/**'
       - '.github/workflows/build-and-push.yml'
@@ -100,6 +100,7 @@ jobs:
           build-args: |
             VITE_DEMO_MODE=${{ github.event.inputs.frontend_demo_mode || 'false' }}
             VITE_API_URL=${{ github.event.inputs.frontend_api_url || vars.VITE_API_URL || 'https://ca-verirag-dev-backend.ashyriver-f016f32f.westus2.azurecontainerapps.io' }}
+          push: true
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:${{ github.sha }}
             ${{ env.ACR_LOGIN_SERVER }}/verirag-frontend:latest

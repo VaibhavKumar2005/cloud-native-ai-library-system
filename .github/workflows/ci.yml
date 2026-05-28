@@ -2,12 +2,12 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, agents/azure-login-terraform-setup]
     paths:
       - 'apps/**'
       - '.github/workflows/ci.yml'
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, agents/azure-login-terraform-setup]
     paths:
       - 'apps/**'
       - '.github/workflows/ci.yml'

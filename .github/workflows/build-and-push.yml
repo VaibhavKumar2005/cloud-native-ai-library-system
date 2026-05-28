@@ -2,7 +2,7 @@ name: Build & Push
 
 on:
   push:
-    branches: [main]
+    branches: [main, agents/azure-login-terraform-setup]
     paths:
       - 'apps/**'
       - '.github/workflows/build-and-push.yml'

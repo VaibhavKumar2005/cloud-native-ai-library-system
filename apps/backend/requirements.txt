@@ -10,7 +10,7 @@ Django>=5.1.7  # Was 5.0.2 - Multiple SQL injection and DoS vulnerabilities fixe
 djangorestframework>=3.15.2  # Was 3.14.0 - XSS via break_long_headers fixed (CVE-2024-#21/#133)
 django-cors-headers==4.3.1
 drf-spectacular>=0.27.0  # API documentation (Swagger/OpenAPI)
-gunicorn>=23.0.0  # Was 21.2.0 - HTTP Request Smuggling vulnerabilities fixed (CVE-2024-1135)
+gunicorn>=25.3.0  # Was 21.2.0 - HTTP Request Smuggling vulnerabilities fixed (CVE-2024-1135)
 wheel==0.45.1  # Compatible with langchain-core packaging<24 constraint
 jaraco.context>=6.0.0  # Path traversal via malicious tar archives CVE-2024-6345 fixed
 
